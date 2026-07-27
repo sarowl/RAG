@@ -59,7 +59,7 @@ INDEX_DIR       = Path(os.getenv("INDEX_DIR", "./chromadb_index"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "kiosk_docs")
 EMBED_MODEL     = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 RERANK_MODEL    = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-LLM_MODEL       = os.getenv("LLM_MODEL", "llama3:8b")
+LLM_MODEL       = os.getenv("LLM_MODEL", "llama3.2:3b")
 
 K_RETRIEVE  = 20   # candidates fetched before reranking
 K_RERANK    = 5    # top-k kept after reranking, passed to LLM
