@@ -1,3 +1,40 @@
+## Ollama embeddings
+
+Both `ingest.py` and `aichatbot.py` use Ollama's `embeddinggemma` by default.
+Start Ollama (`ollama serve` if it is not already running) and check `ollama list`
+for `embeddinggemma:latest`. If needed, download it with `ollama pull embeddinggemma`.
+The Python `ollama` dependency is already included in both requirements files.
+
+Optional `.env` settings (use the same embedding model on the laptop and Pi):
+
+```dotenv
+EMBED_MODEL=embeddinggemma
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBED_TIMEOUT=120
+CHUNK_TOKENIZER=sentence-transformers/all-MiniLM-L6-v2
+```
+
+When switching from Hugging Face embeddings, rebuild the vectors before chatting.
+Back up your index if you need to retain it: `--reset` deletes the configured collection
+and clears the ingestion cache so unchanged source documents are processed again.
+Run these commands on the machine with your source documents and Ollama model:
+
+```bash
+python3 ingest.py --reset
+python3 ingest.py --test-query "What are the requirements for graduation?"
+python3 aichatbot.py
+```
+
+You can also build a separate index by setting `INDEX_DIR` in `.env` before running
+both scripts. If indexing on a laptop, copy the rebuilt index to the Pi afterward.
+
+Only embeddings moved to Ollama. Ingestion still uses a Hugging Face tokenizer
+(`CHUNK_TOKENIZER`) for chunk sizing, and the chatbot still uses its Hugging Face
+cross-encoder (`RERANK_MODEL`) for reranking. These need cached models or internet
+access on first use. The chunking tokenizer does not generate vectors.
+
+Integration reference: [Chroma's Ollama embedding function](https://docs.trychroma.com/integrations/embedding-models/ollama).
+
  ### Step 1: Open WSL Terminal
 
   Open Windows Terminal, PowerShell, or Command Prompt and launch WSL:

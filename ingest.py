@@ -12,7 +12,7 @@ Usage:
     python ingest.py --test-query "your question here"
 
 Requirements (install on your laptop):
-    pip install docling chromadb sentence-transformers transformers watchdog rank_bm25 python-dotenv
+    pip install docling chromadb ollama transformers watchdog bm25s python-dotenv
 """
 
 import argparse
@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from embeddings import create_embedding_function
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
 from transformers import AutoTokenizer
@@ -49,7 +49,7 @@ except ImportError:
 DOCS_DIR        = Path(os.getenv("DOCS_DIR",        "./docs"))
 INDEX_DIR       = Path(os.getenv("INDEX_DIR",       "./chromadb_index"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME",      "kiosk_docs")
-EMBED_MODEL     = os.getenv("EMBED_MODEL",          "sentence-transformers/all-MiniLM-L6-v2")
+CHUNK_TOKENIZER = os.getenv("CHUNK_TOKENIZER", "sentence-transformers/all-MiniLM-L6-v2")
 SUPPORTED_EXTS  = {".pdf", ".docx", ".pptx", ".html"}
 
 CHUNK_MAX_TOKENS = int(os.getenv("CHUNK_MAX_TOKENS", "512"))
@@ -111,13 +111,16 @@ class Ingester:
     def __init__(self, index_dir: Path = INDEX_DIR, reset: bool = False):
         self.index_dir = index_dir
 
-        log.info("Loading tokenizer: %s", EMBED_MODEL)
-        self.tokenizer = AutoTokenizer.from_pretrained(EMBED_MODEL)
+        log.info("Loading chunking tokenizer: %s", CHUNK_TOKENIZER)
+        self.tokenizer = AutoTokenizer.from_pretrained(CHUNK_TOKENIZER)
 
-        self.embed_fn = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+        self.embed_fn = create_embedding_function()
 
         log.info("Initialising Docling converter")
         self.converter = DocumentConverter()
+
+
+        
 
         self.chunker = HybridChunker(
             tokenizer=self.tokenizer,
@@ -143,7 +146,9 @@ class Ingester:
             metadata={"hnsw:space": "cosine"},
         )
 
-        self.state = load_state(self.index_dir)
+        self.state = {} if reset else load_state(self.index_dir)
+        if reset:
+            save_state(self.state, self.index_dir)
 
     # ── Per-document pipeline ─────────────────────────────────────────────────
 

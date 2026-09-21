@@ -1,37 +1,25 @@
 """
 aichatbot.py — AI Kiosk Chatbot  (improved)
 
-Changes vs original
-────────────────────
-  FIX  langchain_classic → langchain (correct package)
-  FIX  Embedding function now explicitly shared with ingest.py via the same
-       SentenceTransformerEmbeddingFunction instance — no silent mismatch.
-  FIX  ConversationalRetrievalChain (deprecated, double-LLM-call) replaced
-       with a clean LCEL pipeline.
-  NEW  Cross-encoder reranking: retrieves 20 candidates, reranks to top 5.
-  NEW  Hybrid retrieval: BM25 keyword search fused with vector search via
-       Reciprocal Rank Fusion (RRF) — handles exact matches (codes, names).
-  FIX  Chat history capped at MAX_HISTORY turns to prevent context overflow.
-  FIX  Dead SentenceTransformerEmbeddingFunction import is now actually used.
-  FIX  import os added — was missing, caused NameError on os.getenv()
-  FIX  load_dotenv() moved after all stdlib imports
-  FIX  RERANK_MODEL now also reads from .env like the other config values
+Document and query embeddings use the shared Ollama configuration in embeddings.py.
+Hybrid retrieval and the Hugging Face cross-encoder reranker are retained.
 """
 
 import logging
 import os
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from embeddings import create_embedding_function, OLLAMA_BASE_URL
 
 # LCEL imports — replaces deprecated ConversationalRetrievalChain
 from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.documents import Document
 from langchain_ollama import OllamaLLM
@@ -41,13 +29,13 @@ from sentence_transformers import CrossEncoder
 
 # BM25 for hybrid search keyword leg
 try:
-    from rank_bm25 import BM25Okapi
+    import bm25s
     BM25_AVAILABLE = True
 except ImportError:
     BM25_AVAILABLE = False
     logging.getLogger("kiosk_chatbot").warning(
-        "rank_bm25 not installed — falling back to vector-only retrieval. "
-        "Run: pip install rank_bm25"
+        "bm25s not installed — falling back to vector-only retrieval. "
+        "Run: pip install bm25s"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,16 +45,15 @@ except ImportError:
 
 INDEX_DIR       = Path(os.getenv("INDEX_DIR", "./chromadb_index"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "kiosk_docs")
-EMBED_MODEL     = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 RERANK_MODEL    = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-LLM_MODEL       = os.getenv("LLM_MODEL", "llama3.2:3b")
+LLM_MODEL       = os.getenv("LLM_MODEL", "phi4-mini:3.8b")
 
 K_RETRIEVE  = 20   # candidates fetched before reranking
 K_RERANK    = 5    # top-k kept after reranking, passed to LLM
 MAX_HISTORY = 5    # rolling window — prevents context overflow
 RRF_K       = 60   # RRF constant (standard value from the paper)
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("kiosk_chatbot")
 
 
@@ -103,7 +90,7 @@ class HybridRetriever:
     def __init__(self, collection: Any, reranker: CrossEncoder):
         self.collection = collection
         self.reranker   = reranker
-        self._bm25: BM25Okapi | None = None
+        self._bm25: bm25s.BM25 | None = None
         self._all_ids:  list[str] = []
         self._all_docs: list[str] = []
         self._all_meta: list[dict] = []
@@ -120,15 +107,24 @@ class HybridRetriever:
         self._all_docs  = result["documents"]
         self._all_meta  = result["metadatas"]
 
-        tokenised = [doc.lower().split() for doc in self._all_docs]
-        self._bm25 = BM25Okapi(tokenised)
+        self._bm25 = None
+        tokenised = [(doc or "").lower().split() for doc in self._all_docs]
+        if not any(tokenised):
+            log.info("No text to index — using vector-only retrieval")
+            return
+
+        self._bm25 = bm25s.BM25(method="lucene", k1=1.5, b=0.75)
+        self._bm25.index(tokenised, show_progress=False)
         log.info("BM25 index built — %d documents", len(self._all_ids))
 
     def _vector_search(self, query: str) -> list[str]:
         """Return K_RETRIEVE doc IDs ranked by cosine similarity."""
+        count = self.collection.count()
+        if not count:
+            return []
         results = self.collection.query(
             query_texts=[query],
-            n_results=min(K_RETRIEVE, self.collection.count()),
+            n_results=min(K_RETRIEVE, count),
             include=["metadatas", "distances"],
         )
         return results["ids"][0]
@@ -138,9 +134,18 @@ class HybridRetriever:
         if self._bm25 is None or not self._all_ids:
             return []
         tokens = query.lower().split()
-        scores = self._bm25.get_scores(tokens)
-        ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
-        return [self._all_ids[i] for i in ranked_indices[:K_RETRIEVE]]
+        if not tokens:
+            return []
+        ranked_indices, scores = self._bm25.retrieve(
+            [tokens],
+            k=min(K_RETRIEVE, len(self._all_ids)),
+            show_progress=False,
+        )
+        return [
+            self._all_ids[i]
+            for i, score in zip(ranked_indices[0], scores[0])
+            if score > 0
+        ]
 
     def _id_to_document(self, doc_id: str) -> Document | None:
         """Fetch a single document by ID from ChromaDB."""
@@ -254,8 +259,39 @@ Answer:""",
     def format_context(docs: list[Document]) -> str:
         return "\n\n".join(doc.page_content for doc in docs)
 
+    def generate_answer(inputs: dict) -> dict:
+        class FirstTokenTimer(BaseCallbackHandler):
+            # Record arrival synchronously, excluding callback scheduling delay.
+            run_inline = True
+            ttft: float | None = None
+
+            def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+                if token and self.ttft is None:
+                    self.ttft = perf_counter() - inputs["query_started_at"]
+
+        timer = FirstTokenTimer()
+        prompt_text = qa_prompt.format(
+            context=inputs["context"], question=inputs["standalone_question"],
+        )
+        generation = llm.generate(
+            [prompt_text], callbacks=[timer],
+        ).generations[0][0]
+        metrics = generation.generation_info or {}
+        token_count = metrics.get("eval_count")
+        duration_ns = metrics.get("eval_duration")
+        # Ollama reports generation duration in nanoseconds.
+        tps = (
+            token_count * 1_000_000_000 / duration_ns
+            if token_count is not None and duration_ns and duration_ns > 0
+            else None
+        )
+        return {**inputs, "answer": generation.text, "tps": tps, "ttft": timer.ttft}
+
     chain = (
         RunnablePassthrough.assign(
+            query_started_at=RunnableLambda(lambda _: perf_counter()),
+        )
+        | RunnablePassthrough.assign(
             standalone_question=RunnableLambda(condense_question),
         )
         | RunnablePassthrough.assign(
@@ -268,15 +304,7 @@ Answer:""",
                 lambda x: format_context(x["source_documents"])
             ),
         )
-        | RunnablePassthrough.assign(
-            answer=RunnableLambda(
-                lambda x: (
-                    qa_prompt
-                    | llm
-                    | StrOutputParser()
-                ).invoke({"context": x["context"], "question": x["standalone_question"]})
-            ),
-        )
+        | RunnableLambda(generate_answer)
     )
 
     return chain
@@ -294,7 +322,7 @@ def init_chatbot():
 
     log.info("Loading ChromaDB from %s", INDEX_DIR)
 
-    embed_fn = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+    embed_fn = create_embedding_function()
     client   = chromadb.PersistentClient(path=str(INDEX_DIR))
 
     try:
@@ -303,8 +331,8 @@ def init_chatbot():
             embedding_function=embed_fn,
         )
     except Exception as e:
-        log.error("Collection '%s' not found: %s", COLLECTION_NAME, e)
-        log.info("Run first:  python ingest.py")
+        log.error("Could not open collection '%s': %s", COLLECTION_NAME, e)
+        log.info("If switching embedding models, rebuild with: python ingest.py --reset")
         raise
 
     chunk_count = collection.count()
@@ -316,7 +344,7 @@ def init_chatbot():
     log.info("Loading cross-encoder reranker: %s", RERANK_MODEL)
     reranker  = CrossEncoder(RERANK_MODEL)
     retriever = HybridRetriever(collection=collection, reranker=reranker)
-    llm       = OllamaLLM(model=LLM_MODEL)
+    llm       = OllamaLLM(model=LLM_MODEL, base_url=OLLAMA_BASE_URL)
     chain     = build_chain(retriever, llm)
 
     return chain, retriever
@@ -395,6 +423,12 @@ def main():
             last_sources = result.get("source_documents", [])
 
             print(f"\nKiosk: {answer}\n")
+            tps = result.get("tps")
+            ttft = result.get("ttft")
+            print(f"Time to first token: {ttft:.2f} sec (including retrieval)"
+                  if ttft is not None else "Time to first token: unavailable")
+            print(f"TPS: {tps:.2f} tokens/sec\n" if tps is not None
+                  else "TPS: unavailable\n")
 
             chat_history.append((query, answer))
             if len(chat_history) > MAX_HISTORY:
