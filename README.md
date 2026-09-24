@@ -150,3 +150,40 @@ Playback uses the default ALSA output; verify the kiosk's speaker configuration
 if no sound is heard. Native Windows playback is not implemented.
 
 API reference: [Piper Python API](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_PYTHON.md).
+
+## React UI with the RAG backend
+
+From the repository root, activate the Python environment containing the RAG
+requirements. Ensure Ollama is running, the configured LLM is available (the
+current default is `phi4-mini:3.8b`), and documents have been ingested.
+
+```bash
+source venv_pi/bin/activate
+python api.py
+```
+
+The API loads the existing Chroma collection and reranker once, then listens on
+`127.0.0.1:8000`. In a second terminal:
+
+```bash
+cd aiok_ui
+npm install
+npm run dev
+```
+
+Open the URL printed by Vite. Vite forwards `/api` requests to the Python server.
+`npm run build && npm run preview` also uses this proxy. For other deployments,
+configure the web server to proxy `/api` to this local backend; the generated
+static files alone do not run Python. This API is intended for a local kiosk
+and has no authentication; keep it bound to loopback.
+
+`POST /api/chat` accepts `{"question":"...","history":[["question","answer"]]}`
+(up to five completed exchanges) and returns `answer`, deduplicated `sources`,
+`tps`, `ttft`, and a `saved` flag. `GET /api/health` reports when startup finished;
+it does not probe Ollama. Each browser manages its own conversation context.
+New chat clears that context without deleting SQLite records. Retry regenerates
+an answer and logs another completed exchange. Errors remain visible with a
+retry button. Stop discards the pending browser response; backend inference may
+finish and be logged. While inference is active, other requests receive a busy
+response rather than queueing. Piper speech remains available in the CLI;
+the web microphone uses browser speech recognition for input.

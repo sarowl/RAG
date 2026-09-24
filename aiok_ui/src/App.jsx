@@ -27,14 +27,6 @@ const suggestions = [
   { icon: 'file', title: 'Campus guidelines', text: 'Understand university policies', prompt: 'What are the university guidelines for merchandise selling?', color: 'amber' },
   { icon: 'bulb', title: 'Find the right office', text: 'Get help with your concern', prompt: 'Which university office should I contact for my concern?', color: 'purple' },
 ]
-function previewResponse(prompt) {
-  const previewNote = 'This is a preview. The local knowledge base is not connected to this page yet, so I cannot verify requirements, office details, or cite a source. Please confirm current information with the university information or assistance office.'
-  if (/graduat/i.test(prompt)) return `I can help you find graduation requirements in the university’s saved documents once the knowledge base is connected.\n\nShare your program and the academic year you are asking about so the guidance can be specific to your situation.\n\n${previewNote}`
-  if (/insurance/i.test(prompt)) return `For student insurance, the relevant academic year matters. Which academic year are you asking about, and do you need information about coverage or the claims process?\n\n${previewNote}`
-  if (/merchandise|selling|guideline|polic/i.test(prompt)) return `Which campus activity or policy would you like help with? For merchandise selling, describe the activity you are planning so the relevant guidance can be identified.\n\n${previewNote}`
-  if (/office|contact/i.test(prompt)) return `What do you need assistance with? For example, graduation, student insurance, or a campus activity.\n\nI cannot verify an office name, location, or opening hours in this preview. The university information or assistance office can help direct your concern.\n\n${previewNote}`
-  return `I’m here to help with university information from the locally saved knowledge base. Describe the requirement, policy, or service you need help with, and include the academic year if relevant.\n\n${previewNote}`
-}
 function inline(text) { return text.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, i) => part.startsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part.startsWith('`') ? <code key={i}>{part.slice(1, -1)}</code> : part) }
 function Markdown({ text, onCopy }) {
   return text.split(/(```[\s\S]*?```)/g).map((block, i) => {
@@ -58,16 +50,42 @@ function App() {
   const [settings, setSettings] = useState(false)
   const [notice, setNotice] = useState('')
   const [listening, setListening] = useState(false)
-  const input = useRef(null), bottom = useRef(null), timer = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
+  const [error, setError] = useState('')
+  const input = useRef(null), bottom = useRef(null), request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('aiok-theme', theme) } catch { /* Storage may be disabled. */ } }, [theme])
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
-  useEffect(() => () => { clearTimeout(timer.current); recognition.current?.abort() }, [])
+  useEffect(() => () => { request.current?.abort(); recognition.current?.abort() }, [])
   useEffect(() => { if (settings) dialog.current?.showModal(); else dialog.current?.close() }, [settings])
-  function stop() { clearTimeout(timer.current); setGenerating(false) }
-  function generate(history) {
-    setGenerating(true)
-    timer.current = setTimeout(() => { setMessages([...history, { id: crypto.randomUUID(), role: 'assistant', text: previewResponse(history.at(-1).text) }]); setGenerating(false) }, 1400)
+  function stop() { request.current?.abort(); request.current = null; setGenerating(false) }
+  async function generate(history) {
+    if (request.current) return
+    const controller = new AbortController()
+    request.current = controller
+    setGenerating(true); setError('')
+    const exchanges = []
+    for (let i = 1; i < history.length - 1; i++) {
+      if (history[i].role === 'assistant' && history[i - 1].role === 'user') {
+        exchanges.push([history[i - 1].text, history[i].text])
+      }
+    }
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: history.at(-1).text, history: exchanges.slice(-5) }),
+        signal: controller.signal,
+      })
+      const result = await response.json().catch(() => { throw new Error('The chat API is unavailable. Check that the backend is running.') })
+      if (!response.ok) throw new Error(result.error || 'Unable to get an answer. Please retry.')
+      if (typeof result.answer !== 'string') throw new Error('The backend returned an invalid answer.')
+      if (request.current !== controller) return
+      setMessages([...history, { id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [] }])
+      if (result.saved === false) setNotice('Answer received, but chat history could not be saved.')
+    } catch (cause) {
+      if (cause.name !== 'AbortError' && request.current === controller) setError(cause.message || 'Unable to connect to the backend.')
+    } finally {
+      if (request.current === controller) { request.current = null; setGenerating(false) }
+    }
   }
   function send(event) {
     event?.preventDefault()
@@ -94,7 +112,7 @@ function App() {
   return <div className="app">
     <header className="topbar">
       <a className="brand" href="./" aria-label="AIOK home"><span>aiok</span></a>
-      <nav aria-label="Chat controls"><button className="new-chat" onClick={() => { stop(); recognition.current?.abort(); setMessages([]); setDraft(''); input.current?.focus() }}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
+      <nav aria-label="Chat controls"><button className="new-chat" onClick={() => { stop(); recognition.current?.abort(); setMessages([]); setDraft(''); setError(''); input.current?.focus() }}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
     </header>
     <main className="conversation" aria-label="Conversation">
       {!messages.length ? <section className="welcome">
@@ -104,18 +122,21 @@ function App() {
         <div className="suggestions">{suggestions.map(item => <button className="suggestion" key={item.title} onClick={() => { setDraft(item.prompt); input.current?.focus() }}><span className={`suggestion-icon ${item.color}`}><Icon name={item.icon} /></span><strong>{item.title}</strong><span>{item.text}</span><span className="card-arrow">↗</span></button>)}</div>
         <p className="welcome-hint">Designed to answer from the university’s locally saved knowledge base.</p>
       </section> : <div className="message-list">{messages.map((message, index) => <article className={`message ${message.role}`} key={message.id}>
-        <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><Icon name="spark" size={16} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}{message.role === 'assistant' && <span className="preview-label">Preview</span>}</div>
+        <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><Icon name="spark" size={16} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}</div>
         <div className="message-body">{message.role === 'assistant' ? <Markdown text={message.text} onCopy={copy} /> : message.text}</div>
+        {message.sources?.length > 0 && <details className="sources"><summary>Sources ({message.sources.length})</summary><ul>{message.sources.map((source, i) => <li key={i}>{source.source || 'Unknown source'}{source.page != null && source.page >= 0 ? ` · page ${source.page}` : ''}{source.headings ? ` · ${source.headings}` : ''}</li>)}</ul></details>}
         {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['up', 'down'].map(vote => <button key={vote} aria-label={vote === 'up' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'down' ? 'dislike' : ''} onClick={() => setMessages(current => current.map(m => m.id === message.id ? { ...m, vote: m.vote === vote ? null : vote } : m))}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
       </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><Icon name="spark" size={16} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
     </main>
     <footer className="composer-footer"><div className="composer-container">
+      {error && <p className="request-error" role="alert">{error}</p>}
+      {!generating && messages.at(-1)?.role === 'user' && <button className="retry-request" onClick={() => generate(messages)}>Retry last question</button>}
       <form className="composer" onSubmit={send}>
         <textarea ref={input} value={draft} rows={1} placeholder="Ask about university information..." aria-label="Ask about university information" onChange={event => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px` }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
-        <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Preview mode</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : 'Use microphone'} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && !draft.trim()} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
+        <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Local knowledge base</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : 'Use microphone'} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && !draft.trim()} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
       </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p><div className="footer-note"></div>
     </div></footer>
-    <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>You’re in preview mode</strong><p>The local knowledge base is not connected yet. Preview responses do not verify university policies or office details. Voice input uses your browser’s speech service. Feedback is kept for this session.</p></div></dialog>
+    <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>Connected to your local RAG pipeline</strong><p>Answers use the indexed university documents. Completed exchanges are saved on the backend. New chat resets the conversation context. Voice input uses your browser’s speech service. Feedback is kept for this session.</p></div></dialog>
     {notice && <div className="toast" role="status">{notice}</div>}
   </div>
 }
