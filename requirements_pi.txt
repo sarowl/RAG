@@ -112,6 +112,7 @@ overrides==7.7.0
 packaging==26.0
 pandas==3.0.3
 pillow==12.2.0
+piper-tts==1.8.0
 pluggy==1.6.0
 polyfactory==3.3.0
 propcache==0.4.1

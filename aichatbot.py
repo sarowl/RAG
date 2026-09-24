@@ -7,9 +7,13 @@ Hybrid retrieval and the Hugging Face cross-encoder reranker are retained.
 
 import logging
 import os
+import sqlite3
 from pathlib import Path
 from time import perf_counter
 from typing import Any
+
+from tts import PiperTTS
+from chat_storage import ChatStorage
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -47,6 +51,7 @@ INDEX_DIR       = Path(os.getenv("INDEX_DIR", "./chromadb_index"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "kiosk_docs")
 RERANK_MODEL    = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 LLM_MODEL       = os.getenv("LLM_MODEL", "phi4-mini:3.8b")
+CHAT_DB_PATH    = Path(os.getenv("CHAT_DB_PATH", "./chat_history.sqlite3"))
 
 K_RETRIEVE  = 20   # candidates fetched before reranking
 K_RERANK    = 5    # top-k kept after reranking, passed to LLM
@@ -379,7 +384,9 @@ def print_sources(sources: list[Document]):
 
 def main():
     log.info("Initializing AI Kiosk Chatbot …")
+    storage = ChatStorage(CHAT_DB_PATH)
     chain, _ = init_chatbot()
+    tts = PiperTTS()
 
     print("\n" + "=" * 60)
     print("         AI Kiosk — Knowledge Base Assistant")
@@ -388,58 +395,83 @@ def main():
     print("  Commands:")
     print("    sources  — show sources from the last answer")
     print("    clear    — reset conversation history")
+    print("    tts on / tts off — enable/disable spoken answers (default: off)")
+    print("    tts      — show speech status")
     print("    exit / quit / q — exit")
     print("=" * 60 + "\n")
 
     chat_history: list[tuple[str, str]] = []
     last_sources: list[Document]        = []
 
-    while True:
-        try:
-            query = input("You: ").strip()
-            if not query:
-                continue
+    try:
+        while True:
+            try:
+                query = input("You: ").strip()
+                if not query:
+                    continue
 
-            if query.lower() in ("exit", "quit", "q"):
-                print("Thank you for using the kiosk. Goodbye!")
+                if query.lower() in ("exit", "quit", "q"):
+                    print("Thank you for using the kiosk. Goodbye!")
+                    break
+
+                if query.lower() in ("tts", "tts on", "tts off"):
+                    try:
+                        if query.lower() != "tts":
+                            tts.set_enabled(query.lower() == "tts on")
+                        print(f"Spoken answers: {'on' if tts.enabled else 'off'}.\n")
+                    except Exception as exc:
+                        print(f"Could not enable spoken answers: {exc}\n")
+                    continue
+
+                if query.lower() == "clear":
+                    tts.stop()
+                    chat_history.clear()
+                    last_sources.clear()
+                    print("Conversation history cleared.\n")
+                    continue
+
+                if query.lower() == "sources":
+                    print_sources(last_sources)
+                    continue
+
+                tts.stop()
+                result = chain.invoke({
+                    "question":     query,
+                    "chat_history": chat_history,
+                })
+
+                answer       = result["answer"]
+                last_sources = result.get("source_documents", [])
+
+                print(f"\nKiosk: {answer}\n")
+                tps = result.get("tps")
+                ttft = result.get("ttft")
+                print(f"Time to first token: {ttft:.2f} sec (including retrieval)"
+                      if ttft is not None else "Time to first token: unavailable")
+                print(f"TPS: {tps:.2f} tokens/sec\n" if tps is not None
+                      else "TPS: unavailable\n")
+
+                try:
+                    storage.save(query, answer, tps, ttft)
+                except sqlite3.Error:
+                    log.exception("Could not save chat exchange to %s", CHAT_DB_PATH)
+                    print("Warning: this exchange could not be saved.\n")
+
+                tts.speak(answer)
+
+                chat_history.append((query, answer))
+                if len(chat_history) > MAX_HISTORY:
+                    chat_history = chat_history[-MAX_HISTORY:]
+
+            except (KeyboardInterrupt, EOFError):
+                print("\n\nSession ended. Goodbye!")
                 break
+            except Exception as e:
+                log.error("Unexpected error: %s", e, exc_info=True)
+                print("Something went wrong. Please try again.\n")
 
-            if query.lower() == "clear":
-                chat_history.clear()
-                last_sources.clear()
-                print("Conversation history cleared.\n")
-                continue
-
-            if query.lower() == "sources":
-                print_sources(last_sources)
-                continue
-
-            result = chain.invoke({
-                "question":     query,
-                "chat_history": chat_history,
-            })
-
-            answer       = result["answer"]
-            last_sources = result.get("source_documents", [])
-
-            print(f"\nKiosk: {answer}\n")
-            tps = result.get("tps")
-            ttft = result.get("ttft")
-            print(f"Time to first token: {ttft:.2f} sec (including retrieval)"
-                  if ttft is not None else "Time to first token: unavailable")
-            print(f"TPS: {tps:.2f} tokens/sec\n" if tps is not None
-                  else "TPS: unavailable\n")
-
-            chat_history.append((query, answer))
-            if len(chat_history) > MAX_HISTORY:
-                chat_history = chat_history[-MAX_HISTORY:]
-
-        except KeyboardInterrupt:
-            print("\n\nSession ended. Goodbye!")
-            break
-        except Exception as e:
-            log.error("Unexpected error: %s", e, exc_info=True)
-            print("Something went wrong. Please try again.\n")
+    finally:
+        tts.close()
 
 
 if __name__ == "__main__":
