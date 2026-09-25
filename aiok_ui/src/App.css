@@ -5,3 +5,5 @@
 .sources summary { cursor: pointer; }
 .request-error { color: #b44035; font-size: 14px; }
 .retry-request { margin-bottom: 10px; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+
+.voice-status { margin-bottom: 8px; font-size: 12px; color: var(--muted); }

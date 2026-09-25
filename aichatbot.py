@@ -13,6 +13,7 @@ from time import perf_counter
 from typing import Any
 
 from tts import PiperTTS
+from stt import VoskSTT, voice_question
 from chat_storage import ChatStorage
 
 from dotenv import load_dotenv
@@ -387,12 +388,14 @@ def main():
     storage = ChatStorage(CHAT_DB_PATH)
     chain, _ = init_chatbot()
     tts = PiperTTS()
+    stt = VoskSTT()
 
     print("\n" + "=" * 60)
     print("         AI Kiosk — Knowledge Base Assistant")
     print("=" * 60)
     print("  Ask any question answered by the loaded documents.")
     print("  Commands:")
+    print("    voice    — speak a question, then review it before sending")
     print("    sources  — show sources from the last answer")
     print("    clear    — reset conversation history")
     print("    tts on / tts off — enable/disable spoken answers (default: off)")
@@ -433,6 +436,11 @@ def main():
                 if query.lower() == "sources":
                     print_sources(last_sources)
                     continue
+
+                if query.lower() == "voice":
+                    query = voice_question(stt, tts)
+                    if not query:
+                        continue
 
                 tts.stop()
                 result = chain.invoke({

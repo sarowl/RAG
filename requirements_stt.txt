@@ -1,0 +1,3 @@
+# Optional terminal microphone input; install alongside the main requirements.
+vosk==0.3.45
+sounddevice>=0.4.6,<1

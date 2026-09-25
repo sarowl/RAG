@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import AnswerAudio from './AnswerAudio'
+import { createVoiceInput } from './voiceInput'
 import './App.css'
 
 const paths = {
@@ -49,17 +51,22 @@ function App() {
   const [generating, setGenerating] = useState(false)
   const [settings, setSettings] = useState(false)
   const [notice, setNotice] = useState('')
-  const [listening, setListening] = useState(false)
+  const [voiceState, setVoiceState] = useState('idle')
+  const listening = voiceState === 'recording'
+  const voiceBusy = voiceState !== 'idle'
   const [error, setError] = useState('')
+  const audioPlayers = useRef(new Set())
   const input = useRef(null), bottom = useRef(null), request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('aiok-theme', theme) } catch { /* Storage may be disabled. */ } }, [theme])
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
-  useEffect(() => () => { request.current?.abort(); recognition.current?.abort() }, [])
+  useEffect(() => () => { request.current?.abort(); recognition.current?.cancel() }, [])
   useEffect(() => { if (settings) dialog.current?.showModal(); else dialog.current?.close() }, [settings])
-  function stop() { request.current?.abort(); request.current = null; setGenerating(false) }
+  function stopAudio() { audioPlayers.current.forEach(audio => audio.pause()) }
+  function stop() { stopAudio(); request.current?.abort(); request.current = null; setGenerating(false) }
   async function generate(history) {
     if (request.current) return
+    stopAudio()
     const controller = new AbortController()
     request.current = controller
     setGenerating(true); setError('')
@@ -79,7 +86,11 @@ function App() {
       if (!response.ok) throw new Error(result.error || 'Unable to get an answer. Please retry.')
       if (typeof result.answer !== 'string') throw new Error('The backend returned an invalid answer.')
       if (request.current !== controller) return
-      setMessages([...history, { id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [] }])
+      setMessages([...history, {
+        id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [],
+        audio: typeof result.audio === 'string' && result.audio.startsWith('data:audio/wav;base64,') ? result.audio : null,
+        audioError: result.audio_error || (result.tts_enabled === false ? 'Spoken answers are off. Start the backend with --tts to enable them.' : null),
+      }])
       if (result.saved === false) setNotice('Answer received, but chat history could not be saved.')
     } catch (cause) {
       if (cause.name !== 'AbortError' && request.current === controller) setError(cause.message || 'Unable to connect to the backend.')
@@ -89,21 +100,51 @@ function App() {
   }
   function send(event) {
     event?.preventDefault()
-    if (generating || !draft.trim()) return
+    if (generating || voiceBusy || !draft.trim()) return
     const next = [...messages, { id: crypto.randomUUID(), role: 'user', text: draft.trim() }]
     setMessages(next); setDraft(''); generate(next)
     if (input.current) input.current.style.height = 'auto'
   }
   async function copy(text) { try { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard') } catch { setNotice('Clipboard access is unavailable in this browser.') } }
+  function cancelVoice() {
+    recognition.current?.cancel()
+    recognition.current = null
+    setVoiceState('idle')
+  }
+  function newChat() {
+    // Invalidate pending work before clearing the history used as model context.
+    stop()
+    cancelVoice()
+    setMessages([])
+    setDraft('')
+    setError('')
+    setNotice('')
+    if (input.current) {
+      input.current.style.height = 'auto'
+      input.current.focus()
+    }
+  }
   function voice() {
-    if (listening) { recognition.current?.stop(); return }
-    const Speech = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!Speech) { setNotice('Voice input is not supported in this browser. Try Chrome.'); return }
-    const speech = new Speech(); recognition.current = speech; speech.lang = 'en-US'
-    speech.onresult = event => setDraft(current => `${current} ${event.results[0][0].transcript}`.trim())
-    speech.onend = () => setListening(false)
-    speech.onerror = () => { setListening(false); setNotice('Microphone unavailable. Check your browser permissions.') }
-    try { speech.start(); setListening(true) } catch { setNotice('Unable to start voice input.') }
+    if (recognition.current) {
+      if (listening) recognition.current.stop()
+      else cancelVoice()
+      return
+    }
+    stopAudio()
+    const session = createVoiceInput({
+      onState: state => {
+        if (recognition.current !== session) return
+        setVoiceState(state)
+        if (state === 'idle') recognition.current = null
+      },
+      onText: text => {
+        setDraft(current => `${current}${current && !/\s$/.test(current) ? ' ' : ''}${text}`)
+        input.current?.focus()
+      },
+      onError: setNotice,
+    })
+    recognition.current = session
+    session.start()
   }
   function exportChat() {
     const blob = new Blob([messages.map(m => `## ${m.role === 'user' ? 'You' : 'AIOK'}\n\n${m.text}`).join('\n\n')], { type: 'text/markdown' })
@@ -112,7 +153,7 @@ function App() {
   return <div className="app">
     <header className="topbar">
       <a className="brand" href="./" aria-label="AIOK home"><span>aiok</span></a>
-      <nav aria-label="Chat controls"><button className="new-chat" onClick={() => { stop(); recognition.current?.abort(); setMessages([]); setDraft(''); setError(''); input.current?.focus() }}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
+      <nav aria-label="Chat controls"><button className="new-chat" onClick={newChat}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
     </header>
     <main className="conversation" aria-label="Conversation">
       {!messages.length ? <section className="welcome">
@@ -124,6 +165,8 @@ function App() {
       </section> : <div className="message-list">{messages.map((message, index) => <article className={`message ${message.role}`} key={message.id}>
         <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><Icon name="spark" size={16} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}</div>
         <div className="message-body">{message.role === 'assistant' ? <Markdown text={message.text} onCopy={copy} /> : message.text}</div>
+        {message.audio && <AnswerAudio src={message.audio} players={audioPlayers} />}
+        {message.audioError && <p role="status">{message.audioError}</p>}
         {message.sources?.length > 0 && <details className="sources"><summary>Sources ({message.sources.length})</summary><ul>{message.sources.map((source, i) => <li key={i}>{source.source || 'Unknown source'}{source.page != null && source.page >= 0 ? ` · page ${source.page}` : ''}{source.headings ? ` · ${source.headings}` : ''}</li>)}</ul></details>}
         {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['up', 'down'].map(vote => <button key={vote} aria-label={vote === 'up' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'down' ? 'dislike' : ''} onClick={() => setMessages(current => current.map(m => m.id === message.id ? { ...m, vote: m.vote === vote ? null : vote } : m))}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
       </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><Icon name="spark" size={16} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
@@ -131,13 +174,14 @@ function App() {
     <footer className="composer-footer"><div className="composer-container">
       {error && <p className="request-error" role="alert">{error}</p>}
       {!generating && messages.at(-1)?.role === 'user' && <button className="retry-request" onClick={() => generate(messages)}>Retry last question</button>}
+      {voiceBusy && <p className="voice-status" role="status">{listening ? 'Listening… Click the microphone to stop (30 seconds maximum).' : voiceState === 'starting' ? 'Opening microphone… Click again to cancel.' : 'Transcribing… Click the microphone to cancel.'}</p>}
       <form className="composer" onSubmit={send}>
         <textarea ref={input} value={draft} rows={1} placeholder="Ask about university information..." aria-label="Ask about university information" onChange={event => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px` }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
-        <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Local knowledge base</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : 'Use microphone'} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && !draft.trim()} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
+        <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Local knowledge base</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Use microphone'} aria-pressed={voiceBusy} title={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Start recording'} disabled={generating} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && (voiceBusy || !draft.trim())} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
       </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p><div className="footer-note"></div>
     </div></footer>
-    <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>Connected to your local RAG pipeline</strong><p>Answers use the indexed university documents. Completed exchanges are saved on the backend. New chat resets the conversation context. Voice input uses your browser’s speech service. Feedback is kept for this session.</p></div></dialog>
-    {notice && <div className="toast" role="status">{notice}</div>}
+    <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>Connected to your local RAG pipeline</strong><p>Answers use the indexed university documents. Completed exchanges are saved on the backend. New chat resets the conversation context. Voice input records your microphone and transcribes locally with Vosk. Click the microphone again to stop, then review the text before sending. Feedback is kept for this session.</p></div></dialog>
+      {notice && <div className="toast" role="status">{notice}</div>}
   </div>
 }
 export default App

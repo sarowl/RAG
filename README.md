@@ -151,6 +151,46 @@ if no sound is heard. Native Windows playback is not implemented.
 
 API reference: [Piper Python API](https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/API_PYTHON.md).
 
+## Optional terminal voice input (Vosk STT)
+
+Run `python3 aichatbot.py` and type `voice` to speak a question. Recording starts
+only after the **Listening** message, ends after a pause or 15 seconds, and can
+be cancelled with Ctrl+C. Review the transcript: press Enter to send it, type a
+replacement question, or enter `/cancel`. Accepted questions use the same RAG,
+history, SQLite logging, and optional Piper answers as typed questions. Spoken
+text is treated as a question, not as a terminal command.
+
+Install the optional dependencies in your chatbot's Python environment.
+Run these commands from the repository root (the directory containing
+`aichatbot.py`), not from inside `models/`:
+
+```bash
+sudo apt install libportaudio2 unzip
+python3 -m pip install -r requirements_stt.txt
+mkdir -p models
+curl -L --fail https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip -o /tmp/vosk-model.zip
+unzip /tmp/vosk-model.zip -d models
+```
+
+Recognition runs locally after this one-time download; no audio is saved or sent
+to a transcription service. The model loads on first use. Missing dependencies,
+model files, or microphone access leave typed chat available.
+
+Optional `.env` settings:
+
+```dotenv
+VOSK_MODEL=models/vosk-model-small-en-us-0.15
+# Input device ID or a substring of its name; omit for the default microphone.
+# STT_DEVICE=USB
+```
+
+List microphone devices with `python3 -m sounddevice`. Linux/Pi needs a working
+PortAudio input device; WSL also needs microphone access configured in its audio
+environment. To recognize another language, download the appropriate
+[Vosk model](https://alphacephei.com/vosk/models) and set `VOSK_MODEL` to its
+extracted directory. Capture follows the official
+[Vosk microphone example](https://github.com/alphacep/vosk-api/blob/master/python/example/test_microphone.py).
+
 ## React UI with the RAG backend
 
 From the repository root, activate the Python environment containing the RAG
@@ -186,4 +226,40 @@ an answer and logs another completed exchange. Errors remain visible with a
 retry button. Stop discards the pending browser response; backend inference may
 finish and be logged. While inference is active, other requests receive a busy
 response rather than queueing. Piper speech remains available in the CLI;
-the web microphone uses browser speech recognition for input.
+the web microphone records audio for local Vosk speech recognition. Start the backend with `--tts` to include playable Piper audio beneath answers.
+
+
+### Start the browser backend with speech
+
+```bash
+source venv_pi/bin/activate
+python api.py --tts
+```
+
+This loads Piper and includes WAV audio with each completed answer. The browser
+attempts playback automatically and shows audio controls; if autoplay is blocked,
+press play beneath the answer. Audio plays on the browser device. No `aplay` is
+needed for web speech. Synthesis finishes before the answer is returned, adding
+some response latency. A synthesis failure still returns the text answer.
+
+Use `--tts-model /path/to/voice.onnx` to choose a voice (the matching `.json` file
+is required), or set `PIPER_MODEL`. Starting without `--tts` leaves automatic
+Piper speech off; the UI displays that spoken answers are off.
+Restart an already running backend to change this option.
+
+### Browser microphone input
+
+Install `requirements_stt.txt` and the Vosk model using the setup above, then
+restart `python api.py` (or `python api.py --tts` for spoken answers). STT loads
+on first use and does not require a separate flag. `VOSK_MODEL` selects the model.
+
+Click the mic icon to start and allow browser microphone permission. Click it
+again to stop and transcribe; recording also stops after 30 seconds. The text
+is appended to your draft for review before sending. New chat cancels recording
+or a pending transcript. The mic can also cancel while opening or transcribing.
+Use localhost or HTTPS for browser microphone access. Capture uses the browser's
+microphone, so no server audio device or PortAudio is needed for browser input.
+
+`POST /api/stt` accepts mono 16-bit PCM WAV audio (8–96 kHz, up to 30 seconds)
+and returns `{"text":"..."}`. Audio is processed in memory by Vosk on the backend.
+Missing models or dependencies show an error while typed chat remains available.
