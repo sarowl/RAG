@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import AnswerAudio from './AnswerAudio'
+import TouchKeyboard from './TouchKeyboard'
 import { createVoiceInput } from './voiceInput'
 import './App.css'
 
 const paths = {
   plus: 'M12 5v14M5 12h14', arrow: 'M12 19V5m-6 6 6-6 6 6',
-  spark: 'm12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z',
   code: 'm8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16',
   bulb: 'M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 2H9s0-1-1-2',
   file: 'M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h6',
@@ -20,8 +20,11 @@ const paths = {
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   check: 'm5 12 4 4L19 6', stop: 'M6 6h12v12H6Z',
 }
+function SchoolLogo({ size = 20 }) {
+  return <img src={`${import.meta.env.BASE_URL}cebu-institute-of-technology-cebu-city-logo-21A3C50219-seeklogo.com-1717624782.png`} width={size} height={size} style={{ objectFit: 'contain' }} alt="Cebu Institute of Technology logo" />
+}
 function Icon({ name, size = 20 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.spark} /></svg>
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.book} /></svg>
 }
 const suggestions = [
   { icon: 'book', title: 'Graduation requirements', text: 'Prepare for your next step', prompt: 'What are the requirements for graduation?', color: 'sage' },
@@ -48,6 +51,8 @@ function App() {
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem('aiok-theme') || 'light' } catch { return 'light' } })
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  const pendingCaret = useRef(null)
   const [generating, setGenerating] = useState(false)
   const [settings, setSettings] = useState(false)
   const [notice, setNotice] = useState('')
@@ -62,6 +67,40 @@ function App() {
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
   useEffect(() => () => { request.current?.abort(); recognition.current?.cancel() }, [])
   useEffect(() => { if (settings) dialog.current?.showModal(); else dialog.current?.close() }, [settings])
+  useLayoutEffect(() => {
+    const field = input.current
+    if (!field) return
+    field.style.height = 'auto'
+    field.style.height = `${Math.min(field.scrollHeight, keyboardOpen ? 80 : 160)}px`
+    if (pendingCaret.current !== null) {
+      field.focus({ preventScroll: true })
+      field.setSelectionRange(pendingCaret.current, pendingCaret.current)
+      pendingCaret.current = null
+    }
+  }, [draft, keyboardOpen])
+  function typeKey(key) {
+    const field = input.current
+    if (!field) return
+    let start = field.selectionStart
+    const end = field.selectionEnd
+    if (key === 'Backspace' && start === end) {
+      // Remove a whole Unicode character when deleting before the caret.
+      start -= Array.from(draft.slice(0, start)).at(-1)?.length || 0
+    }
+    const insertion = key === 'Backspace' ? '' : key
+    const next = draft.slice(0, start) + insertion + draft.slice(end)
+    const caret = start + insertion.length
+    field.focus({ preventScroll: true })
+    if (next === draft) field.setSelectionRange(caret, caret)
+    else {
+      pendingCaret.current = caret
+      setDraft(next)
+    }
+  }
+  function hideKeyboard() {
+    setKeyboardOpen(false)
+    input.current?.focus({ preventScroll: true })
+  }
   function stopAudio() { audioPlayers.current.forEach(audio => audio.pause()) }
   function stop() { stopAudio(); request.current?.abort(); request.current = null; setGenerating(false) }
   async function generate(history) {
@@ -150,7 +189,7 @@ function App() {
     const blob = new Blob([messages.map(m => `## ${m.role === 'user' ? 'You' : 'AIOK'}\n\n${m.text}`).join('\n\n')], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'aiok-conversation.md'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
-  return <div className="app">
+  return <div className={`app${keyboardOpen ? ' keyboard-open' : ''}`}>
     <header className="topbar">
       <a className="brand" href="./" aria-label="AIOK home"><span>aiok</span></a>
       <nav aria-label="Chat controls"><button className="new-chat" onClick={newChat}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
@@ -163,23 +202,24 @@ function App() {
         <div className="suggestions">{suggestions.map(item => <button className="suggestion" key={item.title} onClick={() => { setDraft(item.prompt); input.current?.focus() }}><span className={`suggestion-icon ${item.color}`}><Icon name={item.icon} /></span><strong>{item.title}</strong><span>{item.text}</span><span className="card-arrow">↗</span></button>)}</div>
         <p className="welcome-hint">Designed to answer from the university’s locally saved knowledge base.</p>
       </section> : <div className="message-list">{messages.map((message, index) => <article className={`message ${message.role}`} key={message.id}>
-        <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><Icon name="spark" size={16} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}</div>
+        <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><SchoolLogo size={24} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}</div>
         <div className="message-body">{message.role === 'assistant' ? <Markdown text={message.text} onCopy={copy} /> : message.text}</div>
         {message.audio && <AnswerAudio src={message.audio} players={audioPlayers} />}
         {message.audioError && <p role="status">{message.audioError}</p>}
         {message.sources?.length > 0 && <details className="sources"><summary>Sources ({message.sources.length})</summary><ul>{message.sources.map((source, i) => <li key={i}>{source.source || 'Unknown source'}{source.page != null && source.page >= 0 ? ` · page ${source.page}` : ''}{source.headings ? ` · ${source.headings}` : ''}</li>)}</ul></details>}
         {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['up', 'down'].map(vote => <button key={vote} aria-label={vote === 'up' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'down' ? 'dislike' : ''} onClick={() => setMessages(current => current.map(m => m.id === message.id ? { ...m, vote: m.vote === vote ? null : vote } : m))}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
-      </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><Icon name="spark" size={16} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
+      </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><SchoolLogo size={24} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
     </main>
     <footer className="composer-footer"><div className="composer-container">
       {error && <p className="request-error" role="alert">{error}</p>}
       {!generating && messages.at(-1)?.role === 'user' && <button className="retry-request" onClick={() => generate(messages)}>Retry last question</button>}
       {voiceBusy && <p className="voice-status" role="status">{listening ? 'Listening… Click the microphone to stop (30 seconds maximum).' : voiceState === 'starting' ? 'Opening microphone… Click again to cancel.' : 'Transcribing… Click the microphone to cancel.'}</p>}
       <form className="composer" onSubmit={send}>
-        <textarea ref={input} value={draft} rows={1} placeholder="Ask about university information..." aria-label="Ask about university information" onChange={event => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px` }} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
+        <textarea ref={input} value={draft} rows={1} inputMode="none" placeholder="Ask about university information..." aria-label="Ask about university information" aria-controls={keyboardOpen ? 'touch-keyboard' : undefined} onClick={() => setKeyboardOpen(true)} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') hideKeyboard(); if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
         <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Local knowledge base</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Use microphone'} aria-pressed={voiceBusy} title={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Start recording'} disabled={generating} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && (voiceBusy || !draft.trim())} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
       </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p><div className="footer-note"></div>
     </div></footer>
+    {keyboardOpen && <TouchKeyboard onKey={typeKey} onHide={hideKeyboard} />}
     <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>Connected to your local RAG pipeline</strong><p>Answers use the indexed university documents. Completed exchanges are saved on the backend. New chat resets the conversation context. Voice input records your microphone and transcribes locally with Vosk. Click the microphone again to stop, then review the text before sending. Feedback is kept for this session.</p></div></dialog>
       {notice && <div className="toast" role="status">{notice}</div>}
   </div>
