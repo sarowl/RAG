@@ -11,6 +11,8 @@ import json
 import logging
 import sqlite3
 import threading
+from urllib.parse import urlsplit, parse_qs
+from admin_manager import AdminManager, MAX_UPLOAD
 
 MAX_BODY = 128 * 1024
 MAX_TEXT = 12000
@@ -48,9 +50,10 @@ def load_speech(model_path):
     return synthesize
 
 
-def create_server(address, chain, storage, speech=None, stt=None):
+def create_server(address, chain, storage, speech=None, stt=None, admin=None):
     # Protect the shared reranker and avoid concurrent generations on the kiosk.
     generation_lock = threading.Lock()
+    admin = admin if admin is not None else AdminManager()
     from stt import VoskSTT
     transcriber = stt if stt is not None else VoskSTT()
     transcription_lock = threading.Lock()
@@ -68,13 +71,70 @@ def create_server(address, chain, storage, speech=None, stt=None):
             except (BrokenPipeError, ConnectionResetError):
                 pass  # The browser stopped waiting for this answer.
 
+        def admin_request(self):
+            route = urlsplit(self.path)
+            token = self.headers.get('Authorization', '').removeprefix('Bearer ')
+            try:
+                if route.path != '/api/admin/login' and not admin.authorized(token):
+                    self.respond(401, {'error': 'Administrator session expired. Enter your PIN again.'})
+                    return
+                if self.command == 'GET' and route.path == '/api/admin/files':
+                    self.respond(200, admin.snapshot())
+                    return
+                if self.command != 'POST':
+                    self.respond(404, {'error': 'Not found.'})
+                    return
+                length = int(self.headers.get('Content-Length', '0'))
+                limit = MAX_UPLOAD if route.path == '/api/admin/upload' else MAX_BODY
+                if not 0 < length <= limit:
+                    self.respond(413, {'error': 'Empty or oversized request (uploads: maximum 25 MB).'})
+                    return
+                self.connection.settimeout(30)
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    raise ValueError('Incomplete upload.')
+                if route.path == '/api/admin/upload':
+                    name = parse_qs(route.query).get('name', [''])[0]
+                    admin.upload(name, body)
+                    self.respond(201, {'message': 'Uploaded. Run ingestion to make this file searchable.'})
+                    return
+                data = json.loads(body)
+                if not isinstance(data, dict):
+                    raise ValueError('Expected a JSON object.')
+                if route.path == '/api/admin/login':
+                    self.respond(200, {'token': admin.login(data.get('pin'))})
+                elif route.path == '/api/admin/logout':
+                    admin.logout(token)
+                    self.respond(200, {'message': 'Signed out.'})
+                elif route.path in ('/api/admin/ingest', '/api/admin/reset', '/api/admin/remove'):
+                    action = route.path.rsplit('/', 1)[-1]
+                    if action == 'remove':
+                        admin.path(data.get('name'))
+                    admin.start(action, generation_lock, data.get('name'))
+                    self.respond(202, {'message': 'Operation started.'})
+                else:
+                    self.respond(404, {'error': 'Not found.'})
+            except PermissionError as exc:
+                self.respond(401, {'error': str(exc)})
+            except (ValueError, OSError) as exc:
+                self.respond(400, {'error': str(exc)})
+            except Exception:
+                log.exception('Admin request failed')
+                self.respond(500, {'error': 'Knowledge-base operation unavailable. Check backend logs.'})
+
         def do_GET(self):
+            if self.path.startswith('/api/admin/'):
+                self.admin_request()
+                return
             if self.path == '/api/health':
                 self.respond(200, {'status': 'ready', 'tts_enabled': speech is not None})
             else:
                 self.respond(404, {'error': 'Not found.'})
 
         def do_POST(self):
+            if self.path.startswith('/api/admin/'):
+                self.admin_request()
+                return
             if self.path == '/api/stt':
                 self.transcribe()
                 return
@@ -173,8 +233,8 @@ def main():
             parser.error(f'Cannot enable TTS: {exc}')
     from aichatbot import CHAT_DB_PATH, init_chatbot
     from chat_storage import ChatStorage
-    chain, _ = init_chatbot()
-    with create_server((args.host, args.port), chain, ChatStorage(CHAT_DB_PATH), speech=speech) as server:
+    chain, retriever = init_chatbot()
+    with create_server((args.host, args.port), chain, ChatStorage(CHAT_DB_PATH), speech=speech, admin=AdminManager(retriever)) as server:
         print(f'RAG API ready at http://{args.host}:{args.port}', flush=True)
         print(f'Browser speech: {"on" if speech else "off"}', flush=True)
         try:

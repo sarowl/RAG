@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import Admin, { AdminAccess } from './Admin'
 import AnswerAudio from './AnswerAudio'
 import TouchKeyboard from './TouchKeyboard'
 import { createVoiceInput } from './voiceInput'
@@ -16,7 +17,6 @@ const paths = {
   copy: 'M9 9h11v12H9ZM15 9V3H3v12h6',
   retry: 'M20 7v5h-5M20 12a8 8 0 1 0-2 6',
   like: 'M7 10v11H3V10Zm0 0 5-8c3 0 2 5 2 7h6l-2 12H7',
-  moon: 'M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   check: 'm5 12 4 4L19 6', stop: 'M6 6h12v12H6Z',
 }
@@ -48,12 +48,12 @@ function Markdown({ text, onCopy }) {
   })
 }
 function App() {
-  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('aiok-theme') || 'light' } catch { return 'light' } })
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
   const [keyboardOpen, setKeyboardOpen] = useState(false)
   const pendingCaret = useRef(null)
   const [generating, setGenerating] = useState(false)
+  const [adminToken, setAdminToken] = useState(null)
   const [settings, setSettings] = useState(false)
   const [notice, setNotice] = useState('')
   const [voiceState, setVoiceState] = useState('idle')
@@ -62,7 +62,6 @@ function App() {
   const [error, setError] = useState('')
   const audioPlayers = useRef(new Set())
   const input = useRef(null), bottom = useRef(null), request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
-  useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('aiok-theme', theme) } catch { /* Storage may be disabled. */ } }, [theme])
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
   useEffect(() => () => { request.current?.abort(); recognition.current?.cancel() }, [])
@@ -185,14 +184,11 @@ function App() {
     recognition.current = session
     session.start()
   }
-  function exportChat() {
-    const blob = new Blob([messages.map(m => `## ${m.role === 'user' ? 'You' : 'AIOK'}\n\n${m.text}`).join('\n\n')], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = 'aiok-conversation.md'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
+  if (adminToken) return <Admin token={adminToken} onExit={() => setAdminToken(null)} />
   return <div className={`app${keyboardOpen ? ' keyboard-open' : ''}`}>
     <header className="topbar">
       <a className="brand" href="./" aria-label="AIOK home"><span>aiok</span></a>
-      <nav aria-label="Chat controls"><button className="new-chat" onClick={newChat}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button><span className="avatar" aria-label="Guest user">Y</span></nav>
+      <nav aria-label="Chat controls"><button className="new-chat" onClick={newChat}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button></nav>
     </header>
     <main className="conversation" aria-label="Conversation">
       {!messages.length ? <section className="welcome">
@@ -220,7 +216,10 @@ function App() {
       </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p><div className="footer-note"></div>
     </div></footer>
     {keyboardOpen && <TouchKeyboard onKey={typeKey} onHide={hideKeyboard} />}
-    <dialog ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}><div className="settings-heading"><h2>Assistant settings</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div><p>Choose how you use your university assistant.</p><div className="setting-row"><span><Icon name="moon" />Appearance</span><select aria-label="Color theme" value={theme} onChange={event => setTheme(event.target.value)}><option value="light">Light</option><option value="dark">Dark</option></select></div><button className="export-button" onClick={exportChat} disabled={!messages.length}><Icon name="download" size={18} />Export conversation</button><div className="settings-note"><strong>Connected to your local RAG pipeline</strong><p>Answers use the indexed university documents. Completed exchanges are saved on the backend. New chat resets the conversation context. Voice input records your microphone and transcribes locally with Vosk. Click the microphone again to stop, then review the text before sending. Feedback is kept for this session.</p></div></dialog>
+    <dialog className="settings-dialog" aria-labelledby="settings-title" ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}>
+      <div className="settings-heading"><h2 id="settings-title">Administrator access</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div>
+      {settings && <AdminAccess onAuthorize={token => { stop(); cancelVoice(); setKeyboardOpen(false); setSettings(false); setAdminToken(token) }} />}
+    </dialog>
       {notice && <div className="toast" role="status">{notice}</div>}
   </div>
 }

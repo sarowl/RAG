@@ -263,3 +263,23 @@ microphone, so no server audio device or PortAudio is needed for browser input.
 `POST /api/stt` accepts mono 16-bit PCM WAV audio (8–96 kHz, up to 30 seconds)
 and returns `{"text":"..."}`. Audio is processed in memory by Vosk on the backend.
 Missing models or dependencies show an error while typed chat remains available.
+
+### Knowledge-base administration
+
+Open **Settings**, enter the administrator PIN (default **123456**), and select
+**Open admin page**. Set `ADMIN_PIN` in the backend environment or `.env` to
+change the PIN. PIN validation happens on the server; admin sessions expire
+30 minutes after login. **Lock admin & return to chat** signs out.
+
+Administrators can upload PDF, DOCX, PPTX, and HTML documents (25 MB maximum
+per file), list documents, and permanently remove a document and its search
+content. Uploaded files go to `DOCS_DIR` (default `./docs`). Duplicate upload
+names are rejected. Run **ingestion** after uploading; **Reset & reingest**
+clears the search index and rebuilds it from the current source files, keeping
+the files themselves. Both removal and reset require confirmation on the page.
+
+Ingestion uses the existing `ingest.py` dependencies and embedding settings on
+the API host. Operations run in the background with status shown on the admin
+page. Chat is temporarily unavailable during index changes, and the in-memory
+search index is refreshed afterward. Failures are reported on the page; backend
+logs contain details. Restart the API after installing this feature.
