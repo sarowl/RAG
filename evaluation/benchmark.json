@@ -1,0 +1,22 @@
+[
+  {
+    "query_id": "Q001",
+    "query": "What offices do I need to visit if I want to shift to another program?",
+    "reference_answer": "Clearance from Student Affairs, Registrar, Accounting, and your previous department/college, plus approval from the receiving department/college."
+  },
+  {
+    "query_id": "Q002",
+    "query": "What applicants are eligible to apply for the ETEEAP program?",
+    "reference_answer": "Applicants must be Filipino citizens who are at least 25 years old, hold a high school diploma, have at least 5 years of related work experience, and pass the entrance and psychological exams."
+  },
+  {
+    "query_id": "Q003",
+    "query": "Which office is responsible for receiving admission or transfer credentials during enrollment?",
+    "reference_answer": "The Registrar's Office."
+  },
+  {
+    "query_id": "Q004",
+    "query": "What requirements do I need to submit to enroll as a freshman high school graduate at CIT University?",
+    "reference_answer": "You must pass the entrance exam and interview, then submit your original Form 138 or certificate of completion, a certificate of good moral character, and a PSA-certified birth certificate."
+  }
+]
