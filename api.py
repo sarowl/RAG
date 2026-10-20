@@ -170,7 +170,11 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                 except sqlite3.Error:
                     saved = False
                     log.exception('Could not persist exchange')
+                retrieved_contexts = [
+                    doc.page_content for doc in result.get('source_documents', [])
+                ]
                 payload = {'answer': result['answer'], 'sources': sources,
+                           'retrieved_contexts': retrieved_contexts,
                            'tps': result.get('tps'), 'ttft': result.get('ttft'), 'saved': saved,
                            'tts_enabled': speech is not None}
                 if speech is not None:

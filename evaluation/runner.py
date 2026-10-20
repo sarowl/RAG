@@ -7,6 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent
 BENCHMARK_PATH = BASE_DIR / "benchmark.json"
 OUTPUT_PATH = BASE_DIR / "eval_results.csv"
 API_URL = "http://127.0.0.1:8000/api/chat"
+MODEL_NAME = "phi4-mini:3.8b"
 
 
 def main():
@@ -27,8 +28,8 @@ def main():
         seen_ids.add(case["query_id"])
 
     fields = [
-        "query_id", "query", "reference_answer", "answer",
-        "sources", "tps", "ttft", "status", "error",
+        "model", "query_id", "query", "reference_answer", "answer",
+        "sources", "retrieved_contexts", "tps", "ttft", "status", "error",
     ]
 
     # Exclusive creation prevents accidentally overwriting an earlier run.
@@ -38,6 +39,7 @@ def main():
 
         for case in benchmark:
             row = {
+                "model": MODEL_NAME,
                 "query_id": case["query_id"],
                 "query": case["query"],
                 "reference_answer": case["reference_answer"],
@@ -65,6 +67,9 @@ def main():
                     "answer": answer,
                     "sources": json.dumps(
                         result.get("sources", []), ensure_ascii=False
+                    ),
+                    "retrieved_contexts": json.dumps(
+                        result.get("retrieved_contexts", []), ensure_ascii=False
                     ),
                     "tps": result.get("tps"),
                     "ttft": result.get("ttft"),
