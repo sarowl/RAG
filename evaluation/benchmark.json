@@ -1,52 +1,52 @@
 [
   {
-    "query_id": "Q001",
-    "query": "What offices do I need to visit if I want to shift to another program?",
-    "reference_answer": "To shift to another program, a student must secure clearance from the Student Affairs Office, the Registrar's Office, the Accounting Office, and their previous department or college, as well as approval from the receiving department or college."
+    "query_id": "Q041",
+    "query": "What is the regular allowable unit range per semester for a Non-Academic Scholar?",
+    "reference_answer": "A Non-Academic Scholar must enroll in a minimum of 12 units and a maximum of 18 units per semester."
   },
   {
-    "query_id": "Q002",
-    "query": "What applicants are eligible to apply for the ETEEAP program?",
-    "reference_answer": "Applicants eligible for the ETEEAP program must be Filipino citizens who are at least 25 years old, hold a high school diploma, have at least 5 years of related work experience, and pass the entrance and psychological examinations."
+    "query_id": "Q042",
+    "query": "What is the minimum residency requirement for a transferee enrolled in a 4-year degree program before they can graduate?",
+    "reference_answer": "For a 4-year degree program, a transferee must satisfy a residency requirement of at least two semesters including summer, taking the total units of the last two semesters at CIT University."
   },
   {
-    "query_id": "Q003",
-    "query": "Which office is responsible for receiving admission or transfer credentials during enrollment?",
-    "reference_answer": "The Registrar's Office is responsible for receiving required admission or transfer credentials during the enrollment period."
+    "query_id": "Q043",
+    "query": "What General Weighted Average range is required for a student to graduate Cum Laude?",
+    "reference_answer": "To graduate with Cum Laude honors, a student must achieve a General Weighted Average (GWA) ranging from 4.400 to 4.599."
   },
   {
-    "query_id": "Q004",
-    "query": "What requirements do I need to submit to enroll as a freshman high school graduate at CIT University?",
-    "reference_answer": "To enroll as a freshman high school graduate at CIT University, you must pass the entrance examination and interview, then submit your original Form 138 report card or certificate of completion, a certificate of good moral character, and a PSA-certified copy of your birth certificate."
+    "query_id": "Q044",
+    "query": "Does receiving a mark of NC or a failing grade in Physical Education disqualify a student from graduation honors?",
+    "reference_answer": "Yes, receiving an NC (No Credit) mark or a failing grade in any course, including Physical Education and NSTP, automatically disqualifies a student from receiving graduation honors."
   },
   {
-    "query_id": "Q005",
-    "query": "Where should a student obtain an excuse slip to present to their instructors after being absent?",
-    "reference_answer": "A student must obtain an official excuse slip from the Student Affairs Office, signed by the Head of the Student Affairs Office, to present to their instructors after being absent."
+    "query_id": "Q045",
+    "query": "What documents must a student submit before being allowed to join a required off-campus field trip?",
+    "reference_answer": "Before joining an off-campus field trip, a student must submit a notarized affidavit of parental or guardian consent with a waiver, along with a student health information sheet or medical clearance."
   },
   {
-    "query_id": "Q006",
-    "query": "Where can a student get an official withdrawal form if they decide to drop a subject?",
-    "reference_answer": "A student who wants to drop or withdraw from a subject can obtain an official Withdrawal Form from the Registrar's Office."
+    "query_id": "Q046",
+    "query": "What alternative is given to students who cannot participate in an off-campus field trip?",
+    "reference_answer": "Students who are unable to join an off-campus field trip are assigned a parallel in-school activity that provides comparable knowledge acquisition and fulfills the required practical competencies."
   },
   {
-    "query_id": "Q007",
-    "query": "How much will a student be charged if they officially withdraw from a course within the second week of semester?",
-    "reference_answer": "If a student officially withdraws from a course within the second week of classes during a regular semester, they will be charged 20% of the total school fees."
+    "query_id": "Q047",
+    "query": "What is the latest allowable time for a touring party to return and disembark at the CIT campus after an off-campus activity?",
+    "reference_answer": "All participants and chaperones in an off-campus activity must return to and disembark at the CIT University campus no later than 8:00 PM."
   },
   {
-    "query_id": "Q008",
-    "query": "What credentials must a student present inside the examination room to be allowed to take exams?",
-    "reference_answer": "Inside the examination room, a student must present an official Admission Slip and a valid Student Identification Card while wearing the prescribed school uniform."
+    "query_id": "Q048",
+    "query": "Which committee receives, investigates, and evaluates reported cases of sexual harassment on campus?",
+    "reference_answer": "The Committee on Decorum and Investigation is responsible for receiving complaints, conducting hearings, and investigating alleged cases of sexual harassment."
   },
   {
-    "query_id": "Q009",
-    "query": "What grade is given to a student who fails to take the final examination due to illness or emergency?",
-    "reference_answer": "A student who fails to take the final examination due to excusable grounds such as sickness, emergency, or accident is given an INC or Incomplete mark."
+    "query_id": "Q049",
+    "query": "Within how many days must a respondent file a written answer after receiving a copy of a sexual harassment complaint?",
+    "reference_answer": "A respondent must file a written answer within ten calendar days from receipt of a copy of the sexual harassment complaint."
   },
   {
-    "query_id": "Q010",
-    "query": "Who should a student approach to address discrepancies in their final grades?",
-    "reference_answer": "Any discrepancies or complaints regarding final grades must be addressed directly to the concerned faculty member or instructor within the following semester."
+    "query_id": "Q050",
+    "query": "What is the prescriptive period for filing an action arising from a violation of the Anti-Sexual Harassment Act and school rules?",
+    "reference_answer": "Any administrative action or complaint arising from a violation of the Anti-Sexual Harassment Act and school rules prescribes in three years."
   }
 ]
