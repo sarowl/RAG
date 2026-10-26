@@ -1,42 +1,52 @@
 [
   {
-    "query_id": "Q008",
-    "query": "What credentials must a student present inside the examination room to be allowed to take exams?",
-    "reference_answer": "Inside the examination room, a student must present an official Admission Slip and a valid Student Identification Card while wearing the prescribed school uniform."
+    "query_id": "Q041",
+    "query": "What is the regular allowable unit range per semester for a Non-Academic Scholar?",
+    "reference_answer": "A Non-Academic Scholar must enroll in a minimum of 12 units and a maximum of 18 units per semester."
   },
   {
-    "query_id": "Q018",
-    "query": "Where should a student go to report a lost item or claim a personal belonging?",
-    "reference_answer": "A student should go to the Lost and Found Section located at the Student Affairs Office (SAO) to report a lost item or claim personal belongings."
+    "query_id": "Q042",
+    "query": "What is the minimum residency requirement for a transferee enrolled in a 4-year degree program before they can graduate?",
+    "reference_answer": "For a 4-year degree program, a transferee must satisfy a residency requirement of at least two semesters including summer, taking the total units of the last two semesters at CIT University."
   },
   {
-    "query_id": "Q019",
-    "query": "Can alumni or visiting researchers outside CIT University use the campus library facilities?",
-    "reference_answer": "Yes, the Library and Learning Resource Center extends its services to alumni and visiting researchers as long as their research needs do not conflict with those of current CIT University students and faculty."
+    "query_id": "Q043",
+    "query": "What General Weighted Average range is required for a student to graduate Cum Laude?",
+    "reference_answer": "To graduate with Cum Laude honors, a student must achieve a General Weighted Average (GWA) ranging from 4.400 to 4.599."
   },
   {
-    "query_id": "Q028",
-    "query": "What email address should a student send their insurance claims to?",
-    "reference_answer": "Student insurance claims must be emailed to mllipnica@pjlhuillier.com, with carbon copies sent to clibcebu@pjlhuillier.com, ssg@cit.edu, and sso@cit.edu."
+    "query_id": "Q044",
+    "query": "Does receiving a mark of NC or a failing grade in Physical Education disqualify a student from graduation honors?",
+    "reference_answer": "Yes, receiving an NC (No Credit) mark or a failing grade in any course, including Physical Education and NSTP, automatically disqualifies a student from receiving graduation honors."
   },
   {
-    "query_id": "Q034",
-    "query": "What penalty is imposed on a student for a first-offense cheating incident during an examination?",
-    "reference_answer": "A student caught cheating on an examination for the first time will receive a formal reprimand or censure and will automatically receive a grade of zero for that specific examination."
+    "query_id": "Q045",
+    "query": "What documents must a student submit before being allowed to join a required off-campus field trip?",
+    "reference_answer": "Before joining an off-campus field trip, a student must submit a notarized affidavit of parental or guardian consent with a waiver, along with a student health information sheet or medical clearance."
   },
   {
-    "query_id": "Q036",
-    "query": "Are male students allowed to wear long hair, dreadlocks, or body piercings on campus?",
-    "reference_answer": "No, long hair, dreadlocks, body piercings, and tattoos are strictly prohibited for male students at CIT University."
+    "query_id": "Q046",
+    "query": "What alternative is given to students who cannot participate in an off-campus field trip?",
+    "reference_answer": "Students who are unable to join an off-campus field trip are assigned a parallel in-school activity that provides comparable knowledge acquisition and fulfills the required practical competencies."
   },
   {
-    "query_id": "Q039",
-    "query": "What penalty is imposed for a first-offense violation of the prescribed school dress code?",
-    "reference_answer": "A first-offense violation of the prescribed uniform and dress code policy results in a formal warning."
+    "query_id": "Q047",
+    "query": "What is the latest allowable time for a touring party to return and disembark at the CIT campus after an off-campus activity?",
+    "reference_answer": "All participants and chaperones in an off-campus activity must return to and disembark at the CIT University campus no later than 8:00 PM."
   },
   {
-    "query_id": "Q040",
-    "query": "What is the maximum number of years a Non-Academic Scholar can enjoy free tuition privileges?",
-    "reference_answer": "A Non-Academic Scholar (NAS) can enjoy scholarship privileges for a maximum of five years to complete one baccalaureate degree."
+    "query_id": "Q048",
+    "query": "Which committee receives, investigates, and evaluates reported cases of sexual harassment on campus?",
+    "reference_answer": "The Committee on Decorum and Investigation is responsible for receiving complaints, conducting hearings, and investigating alleged cases of sexual harassment."
+  },
+  {
+    "query_id": "Q049",
+    "query": "Within how many days must a respondent file a written answer after receiving a copy of a sexual harassment complaint?",
+    "reference_answer": "A respondent must file a written answer within ten calendar days from receipt of a copy of the sexual harassment complaint."
+  },
+  {
+    "query_id": "Q050",
+    "query": "What is the prescriptive period for filing an action arising from a violation of the Anti-Sexual Harassment Act and school rules?",
+    "reference_answer": "Any administrative action or complaint arising from a violation of the Anti-Sexual Harassment Act and school rules prescribes in three years."
   }
 ]

@@ -7,7 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent
 BENCHMARK_PATH = BASE_DIR / "benchmark.json"
 OUTPUT_PATH = BASE_DIR / "eval_results.csv"
 API_URL = "http://127.0.0.1:8000/api/chat"
-MODEL_NAME = "phi4-mini:3.8b"
+MODEL_NAME = "llama3.2:3b"
 
 
 def main():
