@@ -53,6 +53,27 @@ class AdminTests(unittest.TestCase):
         self.request('logout', {}, token)
         self.assertEqual(self.request('files', token=token)[0], 401)
 
+    def test_chat_history_requires_admin_session_and_returns_records(self):
+        self.assertEqual(self.request('history')[0], 401)
+        with tempfile.TemporaryDirectory() as directory:
+            from chat_storage import ChatStorage
+            storage = ChatStorage(Path(directory) / 'chat.sqlite3')
+            storage.save('Question', 'Generated response', 8.25, 0.4)
+            # The storage passed to this handler is supplied when the server is created.
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join()
+            self.server = create_server(('127.0.0.1', 0), Mock(), storage, stt=Mock(), admin=self.admin)
+            self.thread = threading.Thread(target=self.server.serve_forever)
+            self.thread.start()
+            with patch.dict('os.environ', {'ADMIN_PIN': '123456'}):
+                token = self.admin.login('123456')
+            status, result = self.request('history', token=token)
+            self.assertEqual(status, 200)
+            self.assertEqual(result['records'][0]['user_query'], 'Question')
+            self.assertEqual(result['records'][0]['llm_answer'], 'Generated response')
+            self.assertEqual(result['records'][0]['tps'], 8.25)
+
     def test_remove_refreshes_search_and_persists_state(self):
         path = Path(self.temp.name) / 'a.pdf'
         path.write_bytes(b'document')

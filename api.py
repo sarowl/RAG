@@ -81,6 +81,13 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                 if self.command == 'GET' and route.path == '/api/admin/files':
                     self.respond(200, admin.snapshot())
                     return
+                if self.command == 'GET' and route.path == '/api/admin/history':
+                    try:
+                        limit = int(parse_qs(route.query).get('limit', ['500'])[0])
+                    except ValueError:
+                        raise ValueError('History limit must be a number.') from None
+                    self.respond(200, {'records': storage.list_recent(limit)})
+                    return
                 if self.command != 'POST':
                     self.respond(404, {'error': 'Not found.'})
                     return
@@ -138,6 +145,9 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
             if self.path == '/api/stt':
                 self.transcribe()
                 return
+            if self.path == '/api/feedback':
+                self.save_feedback()
+                return
             if self.path != '/api/chat':
                 self.respond(404, {'error': 'Not found.'})
                 return
@@ -166,9 +176,10 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                         sources.append(source)
                 saved = True
                 try:
-                    storage.save(inputs['question'], result['answer'], result.get('tps'), result.get('ttft'))
+                    message_id = storage.save(inputs['question'], result['answer'], result.get('tps'), result.get('ttft'))
                 except sqlite3.Error:
                     saved = False
+                    message_id = None
                     log.exception('Could not persist exchange')
                 retrieved_contexts = [
                     doc.page_content for doc in result.get('source_documents', [])
@@ -176,6 +187,7 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                 payload = {'answer': result['answer'], 'sources': sources,
                            'retrieved_contexts': retrieved_contexts,
                            'tps': result.get('tps'), 'ttft': result.get('ttft'), 'saved': saved,
+                           'message_id': message_id,
                            'tts_enabled': speech is not None}
                 if speech is not None:
                     try:
@@ -218,6 +230,34 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                 self.respond(503, {'error': 'Voice input is unavailable. Check the backend Vosk model and requirements_stt.txt installation.'})
             finally:
                 transcription_lock.release()
+
+        def save_feedback(self):
+            if self.headers.get_content_type() != 'application/json':
+                self.respond(415, {'error': 'Use application/json.'})
+                return
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if length <= 0 or length > 1024:
+                    raise ValueError('Request body is empty or too large.')
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError('Expected a JSON object.')
+                message_id, feedback = data.get('message_id'), data.get('feedback')
+                if (not isinstance(message_id, int) or isinstance(message_id, bool)
+                        or message_id <= 0):
+                    raise ValueError('A valid message ID is required.')
+                if feedback not in ('like', 'dislike', None):
+                    raise ValueError('Feedback must be like, dislike, or null.')
+                if not storage.set_feedback(message_id, feedback):
+                    self.respond(404, {'error': 'Chat response was not found.'})
+                    return
+                self.respond(200, {'saved': True, 'feedback': feedback})
+            except (ValueError, UnicodeDecodeError, OSError, sqlite3.Error) as exc:
+                if isinstance(exc, sqlite3.Error):
+                    log.exception('Could not persist response feedback')
+                    self.respond(500, {'error': 'Could not save feedback.'})
+                else:
+                    self.respond(400, {'error': str(exc)})
 
     return ThreadingHTTPServer(address, Handler)
 

@@ -44,3 +44,10 @@
 .admin-access .admin-unlock:hover:not(:disabled){background:var(--accent);filter:brightness(.92)}
 .settings-dialog .export-button{justify-content:center;margin-top:20px;color:var(--muted);font-size:12px}
 @media(max-height:650px){.settings-dialog{padding:18px}.settings-dialog .admin-access>p:first-child{margin-bottom:14px}.admin-numpad{gap:8px;margin:12px 0}.admin-access .admin-numpad button{min-height:44px}.settings-dialog .export-button{margin-top:14px}}
+
+.admin-job-status{display:flex;align-items:flex-start;gap:12px;margin-top:20px;padding:16px;border:1px solid #adc5b0;border-left:4px solid #376344;border-radius:10px;background:#edf5ee;color:#254d30;overflow-wrap:anywhere}
+.admin-job-status strong{display:block;font-size:15px;line-height:1.5}
+.admin-panel .admin-job-status p{margin:4px 0 0;color:inherit;font-size:14px;line-height:1.6}
+.admin-status-icon{display:grid;place-items:center;flex-shrink:0;width:24px;height:24px;border:1px solid currentColor;border-radius:50%;font-size:14px;font-weight:700}
+.admin-job-status[data-state="loading"],.admin-job-status[data-state="running"]{background:#edf4fc;border-color:#a6c2e0;border-left-color:#285a8e;color:#234f7d}
+.admin-job-status[data-state="failed"]{background:#fff0ee;border-color:#e4aaa3;border-left-color:#a82d25;color:#932b24}

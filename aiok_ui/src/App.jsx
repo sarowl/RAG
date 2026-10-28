@@ -126,6 +126,8 @@ function App() {
       if (request.current !== controller) return
       setMessages([...history, {
         id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [],
+        messageId: Number.isInteger(result.message_id) ? result.message_id : null,
+        vote: null,
         audio: typeof result.audio === 'string' && result.audio.startsWith('data:audio/wav;base64,') ? result.audio : null,
         audioError: result.audio_error || (result.tts_enabled === false ? 'Spoken answers are off. Start the backend with --tts to enable them.' : null),
       }])
@@ -144,6 +146,21 @@ function App() {
     if (input.current) input.current.style.height = 'auto'
   }
   async function copy(text) { try { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard') } catch { setNotice('Clipboard access is unavailable in this browser.') } }
+  async function vote(message, vote) {
+    const feedback = message.vote === vote ? null : vote
+    if (!message.messageId) { setNotice('This response was not saved, so feedback could not be recorded.'); return }
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: message.messageId, feedback }),
+      })
+      const result = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(result.error || 'Could not save feedback.')
+      setMessages(current => current.map(item => item.id === message.id ? { ...item, vote: feedback } : item))
+      setNotice(feedback ? 'Feedback saved' : 'Feedback cleared')
+    } catch (cause) { setNotice(cause.message || 'Could not save feedback.') }
+  }
+  function voteResponse(message, selectedVote) { vote(message, selectedVote) }
   function cancelVoice() {
     recognition.current?.cancel()
     recognition.current = null
@@ -203,7 +220,7 @@ function App() {
         {message.audio && <AnswerAudio src={message.audio} players={audioPlayers} />}
         {message.audioError && <p role="status">{message.audioError}</p>}
         {message.sources?.length > 0 && <details className="sources"><summary>Sources ({message.sources.length})</summary><ul>{message.sources.map((source, i) => <li key={i}>{source.source || 'Unknown source'}{source.page != null && source.page >= 0 ? ` · page ${source.page}` : ''}{source.headings ? ` · ${source.headings}` : ''}</li>)}</ul></details>}
-        {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['up', 'down'].map(vote => <button key={vote} aria-label={vote === 'up' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'down' ? 'dislike' : ''} onClick={() => setMessages(current => current.map(m => m.id === message.id ? { ...m, vote: m.vote === vote ? null : vote } : m))}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
+        {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['like', 'dislike'].map(vote => <button key={vote} aria-label={vote === 'like' ? 'Like response' : 'Dislike response'} title={vote === 'like' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'dislike' ? 'dislike' : ''} onClick={() => voteResponse(message, vote)}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
       </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><SchoolLogo size={24} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
     </main>
     <footer className="composer-footer"><div className="composer-container">

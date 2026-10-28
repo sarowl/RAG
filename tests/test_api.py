@@ -15,9 +15,10 @@ class ApiTests(unittest.TestCase):
         self.chain = Mock()
         self.chain.invoke.return_value = {
             'answer': 'Bring your ID.', 'tps': 12.0, 'ttft': 0.5,
-            'source_documents': [SimpleNamespace(metadata={'source': 'guide.pdf', 'page': 2})] * 2,
+            'source_documents': [SimpleNamespace(page_content='Bring your ID.', metadata={'source': 'guide.pdf', 'page': 2})] * 2,
         }
         self.storage = Mock()
+        self.storage.save.return_value = 42
         self.server = create_server(('127.0.0.1', 0), self.chain, self.storage, speech=getattr(self, 'speech', None))
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
@@ -42,6 +43,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(result['sources']), 1)
         self.storage.save.assert_called_once_with('What do I bring?', 'Bring your ID.', 12.0, 0.5)
         self.assertTrue(result['saved'])
+        self.assertEqual(result['message_id'], 42)
         self.assertEqual(result['tts_enabled'], hasattr(self, 'speech'))
         if not hasattr(self, 'speech'):
             self.assertNotIn('audio', result)
@@ -72,6 +74,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(health['tts_enabled'], hasattr(self, 'speech'))
         self.assertEqual(self.request({}, '/missing')[0], 404)
+
+    def test_feedback_persists_vote_and_clear(self):
+        self.storage.set_feedback.return_value = True
+        self.assertEqual(self.request({'message_id': 42, 'feedback': 'like'}, '/api/feedback')[0], 200)
+        self.storage.set_feedback.assert_called_with(42, 'like')
+        self.assertEqual(self.request({'message_id': 42, 'feedback': 'dislike'}, '/api/feedback')[0], 200)
+        self.storage.set_feedback.assert_called_with(42, 'dislike')
+        self.assertEqual(self.request({'message_id': 42, 'feedback': None}, '/api/feedback')[0], 200)
+        self.storage.set_feedback.assert_called_with(42, None)
+
+    def test_feedback_validates_message_and_value(self):
+        for body in ({'message_id': 0, 'feedback': 'like'}, {'message_id': 42, 'feedback': 'maybe'}):
+            self.assertEqual(self.request(body, '/api/feedback')[0], 400)
+        self.storage.set_feedback.assert_not_called()
 
 
 class SpeechApiTests(ApiTests):
