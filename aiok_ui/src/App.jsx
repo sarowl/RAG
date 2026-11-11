@@ -33,17 +33,55 @@ const suggestions = [
   { icon: 'bulb', title: 'Find the right office', text: 'Get help with your concern', prompt: 'Which university office should I contact for my concern?', color: 'purple' },
 ]
 function inline(text) { return text.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, i) => part.startsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part.startsWith('`') ? <code key={i}>{part.slice(1, -1)}</code> : part) }
+function renderMarkdownBlocks(text, keyPrefix) {
+  const lines = text.split('\n')
+  const blocks = []
+  let paragraph = []
+  const flushParagraph = () => {
+    if (paragraph.length) blocks.push(<p key={`${keyPrefix}-p-${blocks.length}`}>{inline(paragraph.join(' '))}</p>)
+    paragraph = []
+  }
+  for (let i = 0; i < lines.length;) {
+    const line = lines[i]
+    const unordered = line.match(/^\s*[-*+]\s+(.+)$/)
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+    if (unordered || ordered) {
+      flushParagraph()
+      const isOrdered = Boolean(ordered)
+      const items = []
+      while (i < lines.length) {
+        const match = lines[i].match(isOrdered ? /^\s*(\d+)[.)]\s+(.+)$/ : /^\s*[-*+]\s+(.+)$/)
+        if (!match) break
+        items.push({ number: isOrdered ? Number(match[1]) : null, text: isOrdered ? match[2] : match[1] })
+        i++
+      }
+      const List = isOrdered ? 'ol' : 'ul'
+      blocks.push(<List key={`${keyPrefix}-list-${blocks.length}`} start={isOrdered ? items[0]?.number : undefined}>{items.map((item, n) => <li key={n}>{inline(item.text)}</li>)}</List>)
+      continue
+    }
+    if (!line.trim()) { flushParagraph(); i++; continue }
+    if (/^#{1,3}\s/.test(line)) {
+      flushParagraph()
+      const depth = Math.min(line.match(/^#+/)[0].length, 3)
+      const Heading = `h${depth}`
+      blocks.push(<Heading key={`${keyPrefix}-h-${blocks.length}`}>{inline(line.replace(/^#{1,3}\s+/, ''))}</Heading>)
+      i++; continue
+    }
+    paragraph.push(line.trim())
+    i++
+  }
+  flushParagraph()
+  return blocks
+}
 function Markdown({ text, onCopy }) {
   return text.split(/(```[\s\S]*?```)/g).map((block, i) => {
     if (block.startsWith('```')) {
       const [language, ...lines] = block.slice(3, -3).trim().split('\n')
       return <div className="code-block" key={i}><div><span>{language}</span><button onClick={() => onCopy(lines.join('\n'))}><Icon name="copy" size={14} /> Copy code</button></div><pre><code>{lines.join('\n')}</code></pre></div>
     }
-    return block.split('\n\n').filter(Boolean).map((part, j) => {
+    return block.split('\n\n').filter(Boolean).flatMap((part, j) => {
       if (part.startsWith('|')) return <div className="table-wrap" key={`${i}-${j}`}><table><tbody>{part.split('\n').filter(row => !/^\|[\s:|-]+\|$/.test(row)).map((row, k) => <tr key={k}>{row.split('|').slice(1, -1).map((cell, n) => k === 0 ? <th key={n}>{inline(cell.trim())}</th> : <td key={n}>{inline(cell.trim())}</td>)}</tr>)}</tbody></table></div>
-      if (part.startsWith('### ')) return <h3 key={`${i}-${j}`}>{part.slice(4)}</h3>
-      if (part.startsWith('- ')) return <ul key={`${i}-${j}`}>{part.split('\n').map((line, k) => <li key={k}>{inline(line.replace(/^- /, ''))}</li>)}</ul>
-      return <p key={`${i}-${j}`}>{inline(part)}</p>
+      return renderMarkdownBlocks(part, `${i}-${j}`)
     })
   })
 }

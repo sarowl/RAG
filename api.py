@@ -187,6 +187,8 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                 payload = {'answer': result['answer'], 'sources': sources,
                            'retrieved_contexts': retrieved_contexts,
                            'tps': result.get('tps'), 'ttft': result.get('ttft'), 'saved': saved,
+                           'cache_hit': result.get('cache_hit', False),
+                           'cache_similarity': result.get('cache_similarity'),
                            'message_id': message_id,
                            'tts_enabled': speech is not None}
                 if speech is not None:

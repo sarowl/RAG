@@ -15,6 +15,7 @@ from typing import Any
 from tts import PiperTTS
 from stt import VoskSTT, voice_question
 from chat_storage import ChatStorage
+from semantic_cache import SemanticCache
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -100,10 +101,13 @@ class HybridRetriever:
         self._all_ids:  list[str] = []
         self._all_docs: list[str] = []
         self._all_meta: list[dict] = []
+        self.semantic_cache = None
         self._build_bm25_index()
 
     def _build_bm25_index(self):
         """Load all chunks from ChromaDB and build an in-memory BM25 index."""
+        if self.semantic_cache is not None:
+            self.semantic_cache.clear()
         if not BM25_AVAILABLE:
             return
 
@@ -212,7 +216,7 @@ class HybridRetriever:
 # LCEL CHAIN BUILDER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_chain(retriever: HybridRetriever, llm: OllamaLLM):
+def build_chain(retriever: HybridRetriever, llm: OllamaLLM, embed_fn=None, cache=None):
     """
     LCEL pipeline — one LLM call per query (no history),
     two calls when history exists (condense + answer).
@@ -293,6 +297,43 @@ Answer:""",
         )
         return {**inputs, "answer": generation.text, "tps": tps, "ttft": timer.ttft}
 
+    answer_chain = (
+        RunnablePassthrough.assign(
+            source_documents=RunnableLambda(
+                lambda x: retriever.retrieve(x["standalone_question"])
+            ),
+        )
+        | RunnablePassthrough.assign(
+            context=RunnableLambda(lambda x: format_context(x["source_documents"])),
+        )
+        | RunnableLambda(generate_answer)
+    )
+
+    def cached_answer(inputs: dict) -> dict:
+        vector = None
+        # Scope by history so one conversation cannot reuse another's answer.
+        scope = tuple(tuple(pair) for pair in inputs.get("chat_history", []))
+        if cache is not None and embed_fn is not None:
+            try:
+                vector = embed_fn([inputs["standalone_question"]])[0]
+                hit = cache.lookup(vector, scope)
+                if hit is not None:
+                    payload, similarity = hit
+                    return {**inputs, **payload, "cache_hit": True,
+                            "cache_similarity": similarity, "tps": None,
+                            "ttft": perf_counter() - inputs["query_started_at"]}
+            except Exception:
+                log.warning("Semantic cache lookup failed; generating answer", exc_info=True)
+                vector = None
+        result = answer_chain.invoke(inputs)
+        if vector is not None and result["answer"].strip() and result["source_documents"]:
+            try:
+                cache.store(vector, {key: result[key] for key in
+                                     ("answer", "source_documents", "context")}, scope)
+            except Exception:
+                log.warning("Semantic cache write failed", exc_info=True)
+        return {**result, "cache_hit": False, "cache_similarity": None}
+
     chain = (
         RunnablePassthrough.assign(
             query_started_at=RunnableLambda(lambda _: perf_counter()),
@@ -300,17 +341,7 @@ Answer:""",
         | RunnablePassthrough.assign(
             standalone_question=RunnableLambda(condense_question),
         )
-        | RunnablePassthrough.assign(
-            source_documents=RunnableLambda(
-                lambda x: retriever.retrieve(x["standalone_question"])
-            ),
-        )
-        | RunnablePassthrough.assign(
-            context=RunnableLambda(
-                lambda x: format_context(x["source_documents"])
-            ),
-        )
-        | RunnableLambda(generate_answer)
+        | RunnableLambda(cached_answer)
     )
 
     return chain
@@ -351,7 +382,15 @@ def init_chatbot():
     reranker  = CrossEncoder(RERANK_MODEL)
     retriever = HybridRetriever(collection=collection, reranker=reranker)
     llm       = OllamaLLM(model=LLM_MODEL, base_url=OLLAMA_BASE_URL)
-    chain     = build_chain(retriever, llm)
+    cache = None
+    if os.getenv("SEMANTIC_CACHE_ENABLED", "true").lower() in ("true", "1", "yes"):
+        cache = SemanticCache(
+            threshold=float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.95")),
+            ttl=float(os.getenv("SEMANTIC_CACHE_TTL_SECONDS", "259200")),
+            max_entries=int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "256")),
+        )
+    retriever.semantic_cache = cache
+    chain = build_chain(retriever, llm, embed_fn=embed_fn, cache=cache)
 
     return chain, retriever
 

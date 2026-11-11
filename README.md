@@ -283,3 +283,32 @@ the API host. Operations run in the background with status shown on the admin
 page. Chat is temporarily unavailable during index changes, and the in-memory
 search index is refreshed afterward. Failures are reported on the page; backend
 logs contain details. Restart the API after installing this feature.
+
+### Semantic answer caching
+
+The CLI and HTTP API reuse answers and their sources for semantically similar
+standalone questions, using the shared Ollama embedding model and cosine
+similarity. Follow-ups are condensed before lookup; entries are scoped to the
+exact conversation history. Cache hits skip retrieval, reranking, and answer
+generation (history condensation still runs for follow-ups).
+
+Configure these environment variables before starting the backend:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SEMANTIC_CACHE_ENABLED` | `true` | Set to `false` to disable caching. |
+| `SEMANTIC_CACHE_THRESHOLD` | `0.95` | Minimum cosine similarity, greater than 0 and at most 1. |
+| `SEMANTIC_CACHE_TTL_SECONDS` | `259200` | Entry lifetime in seconds (3 days). |
+| `SEMANTIC_CACHE_MAX_ENTRIES` | `256` | Maximum entries, with least recently used eviction. |
+
+The cache lives in process memory and resets on restart. Admin ingestion,
+removal, and reset operations invalidate it when refreshing search, including
+partially failed operations. Restart the backend after external ingestion.
+Similarity is approximate: raise the threshold or disable caching when closely
+related questions require different answers.
+
+HTTP chat responses include `cache_hit` and `cache_similarity`. On hits, `tps`
+is null because no answer tokens were generated, and `ttft` measures elapsed
+time until the cached answer is ready. Embedding/cache failures fall back to
+the normal answer pipeline. Empty answers and answers without sources are not
+cached. Saving chat history and generating speech still run for every request.
