@@ -193,29 +193,63 @@ extracted directory. Capture follows the official
 
 ## React UI with the RAG backend
 
-From the repository root, activate the Python environment containing the RAG
-requirements. Ensure Ollama is running, the configured LLM is available (the
-current default is `phi4-mini:3.8b`), and documents have been ingested.
+Run the RAG backend and its Admin API on the device that has the knowledge
+base, Ollama, and the configured LLM (the current default is
+`phi4-mini:3.8b`). RAG and Admin use separate ports in one process so Admin
+ingestion shares the chat lock and refreshes the same in-memory retriever.
+On that backend device:
 
 ```bash
 source venv_pi/bin/activate
-python api.py
+python api.py --host 0.0.0.0 --port 8000 --admin-port 8003
 ```
 
-The API loads the existing Chroma collection and reranker once, then listens on
-`127.0.0.1:8000`. In a second terminal:
+Only bind to `0.0.0.0` on a trusted LAN and firewall ports 8000 and 8003 so only
+the Pi can reach them. The RAG API has no authentication; Admin has PIN-based
+sessions, and `ADMIN_PIN` should be changed from its default. Do not port-forward
+these ports to the internet.
+
+On the Pi, install and start the voice services in an environment with the
+project code, Vosk model, and Piper voice files:
+
+```bash
+source venv_pi/bin/activate
+python -m pip install -r requirements_stt.txt piper-tts==1.8.0
+python stt_api.py --host 127.0.0.1 --port 8001
+```
+
+In another Pi terminal, start TTS (speech is off unless `--tts` is supplied):
+
+```bash
+source venv_pi/bin/activate
+python tts_api.py --host 127.0.0.1 --port 8002 --tts
+```
+
+Use `--tts-model /path/to/voice.onnx` or `PIPER_MODEL` to select the voice; its
+matching `.json` file is required. The Pi generates the WAV and the kiosk
+browser plays it through the Pi's speakers. The Pi browser also captures
+microphone audio; only its WAV is sent to Pi-local Vosk, while chat text and
+answers travel to/from the RAG device.
+
+For development, start Vite on the Pi and set the remote backend targets; STT
+and TTS default to loopback on the Pi:
 
 ```bash
 cd aiok_ui
 npm install
-npm run dev
+VITE_RAG_API=http://BACKEND_IP:8000 VITE_ADMIN_API=http://BACKEND_IP:8003 npm run dev -- --host 0.0.0.0
 ```
 
-Open the URL printed by Vite. Vite forwards `/api` requests to the Python server.
-`npm run build && npm run preview` also uses this proxy. For other deployments,
-configure the web server to proxy `/api` to this local backend; the generated
-static files alone do not run Python. This API is intended for a local kiosk
-and has no authentication; keep it bound to loopback.
+Open the printed URL in the Pi's browser using `localhost` so microphone access
+works. The Vite dev and preview proxies route `/api/admin` to Admin, `/api/stt`
+and `/api/tts` to the Pi voice services, and other `/api` requests to RAG.
+Environment variables `VITE_STT_API` and `VITE_TTS_API` can override the local
+voice targets.
+
+For production, build the UI and serve `aiok_ui/dist` on the Pi behind a web
+server configured like [deploy/nginx.conf.example](deploy/nginx.conf.example).
+The static files alone do not run the Python APIs. Use HTTPS if clients other
+than the Pi itself need browser microphone access.
 
 `POST /api/chat` accepts `{"question":"...","history":[["question","answer"]]}`
 (up to five completed exchanges) and returns `answer`, deduplicated `sources`,
@@ -226,43 +260,30 @@ an answer and logs another completed exchange. Errors remain visible with a
 retry button. Stop discards the pending browser response; backend inference may
 finish and be logged. While inference is active, other requests receive a busy
 response rather than queueing. Piper speech remains available in the CLI;
-the web microphone records audio for local Vosk speech recognition. Start the backend with `--tts` to include playable Piper audio beneath answers.
+response rather than queueing. RAG responses contain no speech audio; the browser
+requests it separately from the Pi's TTS API.
 
+### Browser speech APIs
 
-### Start the browser backend with speech
-
-```bash
-source venv_pi/bin/activate
-python api.py --tts
-```
-
-This loads Piper and includes WAV audio with each completed answer. The browser
-attempts playback automatically and shows audio controls; if autoplay is blocked,
-press play beneath the answer. Audio plays on the browser device. No `aplay` is
-needed for web speech. Synthesis finishes before the answer is returned, adding
-some response latency. A synthesis failure still returns the text answer.
-
-Use `--tts-model /path/to/voice.onnx` to choose a voice (the matching `.json` file
-is required), or set `PIPER_MODEL`. Starting without `--tts` leaves automatic
-Piper speech off; the UI displays that spoken answers are off.
-Restart an already running backend to change this option.
-
-### Browser microphone input
-
-Install `requirements_stt.txt` and the Vosk model using the setup above, then
-restart `python api.py` (or `python api.py --tts` for spoken answers). STT loads
-on first use and does not require a separate flag. `VOSK_MODEL` selects the model.
+The Pi's Vosk service loads the model on first use. Set `VOSK_MODEL` if the
+model is outside its default `models/vosk-model-small-en-us-0.15` path. The
+browser sends mono 16-bit PCM WAV audio (8–96 kHz, maximum 30 seconds) to
+`POST /api/stt`; the service returns `{"text":"..."}`. Audio is processed in
+memory and is not forwarded to the RAG device.
 
 Click the mic icon to start and allow browser microphone permission. Click it
 again to stop and transcribe; recording also stops after 30 seconds. The text
 is appended to your draft for review before sending. New chat cancels recording
 or a pending transcript. The mic can also cancel while opening or transcribing.
 Use localhost or HTTPS for browser microphone access. Capture uses the browser's
-microphone, so no server audio device or PortAudio is needed for browser input.
+microphone, so no server audio device is needed for browser input.
 
-`POST /api/stt` accepts mono 16-bit PCM WAV audio (8–96 kHz, up to 30 seconds)
-and returns `{"text":"..."}`. Audio is processed in memory by Vosk on the backend.
-Missing models or dependencies show an error while typed chat remains available.
+After the answer appears, the UI posts its text to `POST /api/tts` on the Pi.
+That endpoint returns `audio/wav`; the browser plays it and provides audio
+controls. Piper is off unless the Pi TTS service is started with `--tts`.
+Synthesis errors do not remove the text answer. Direct requests to each service's
+`/api/health` report its readiness; the proxied `/api/health` targets RAG, which
+does not probe Ollama.
 
 ### Knowledge-base administration
 
@@ -311,4 +332,5 @@ HTTP chat responses include `cache_hit` and `cache_similarity`. On hits, `tps`
 is null because no answer tokens were generated, and `ttft` measures elapsed
 time until the cached answer is ready. Embedding/cache failures fall back to
 the normal answer pipeline. Empty answers and answers without sources are not
-cached. Saving chat history and generating speech still run for every request.
+cached. Saving chat history runs for every request; speech synthesis is a
+separate request to the Pi TTS API after the answer appears.

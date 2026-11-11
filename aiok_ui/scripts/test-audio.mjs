@@ -1,5 +1,5 @@
 // Run after npm run build: node scripts/test-audio.mjs [chromium-path]
-// Uses a temporary browser profile and a stub chat API with a valid WAV file.
+// Uses a temporary browser profile and a stub speech API with a valid WAV file.
 import { createServer } from 'node:http'
 import { readFile, mkdtemp, rm } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
@@ -19,10 +19,18 @@ let mode = 'audio'
 const server = createServer(async (req, res) => {
   if (req.url === '/api/chat') {
     res.setHeader('Content-Type', 'application/json')
-    res.end(JSON.stringify({ answer: 'Audio test answer.', saved: true, tts_enabled: mode !== 'off',
-      ...(mode === 'audio' ? { audio: `data:audio/wav;base64,${wav.toString('base64')}` } : {}),
-      ...(mode === 'error' ? { audio_error: 'Speech is unavailable. You can still read the answer.' } : {}),
-    }))
+    res.end(JSON.stringify({ answer: 'Audio test answer.', saved: true }))
+    return
+  }
+  if (req.url === '/api/tts') {
+    res.setHeader('Content-Type', mode === 'audio' ? 'audio/wav' : 'application/json')
+    if (mode === 'audio') res.end(wav)
+    else {
+      res.statusCode = 503
+      res.end(JSON.stringify({ error: mode === 'off'
+        ? 'Spoken answers are off. Start the Pi TTS service with --tts to enable them.'
+        : 'Speech is unavailable. You can still read the answer.' }))
+    }
     return
   }
   try {

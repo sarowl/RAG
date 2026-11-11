@@ -99,10 +99,17 @@ function App() {
   const voiceBusy = voiceState !== 'idle'
   const [error, setError] = useState('')
   const audioPlayers = useRef(new Set())
+  const audioUrls = useRef(new Set())
   const input = useRef(null), bottom = useRef(null), request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
+  const speechRequest = useRef(null)
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
-  useEffect(() => () => { request.current?.abort(); recognition.current?.cancel() }, [])
+  useEffect(() => () => {
+    request.current?.abort()
+    speechRequest.current?.abort()
+    recognition.current?.cancel()
+    audioUrls.current.forEach(url => URL.revokeObjectURL(url))
+  }, [])
   useEffect(() => { if (settings) dialog.current?.showModal(); else dialog.current?.close() }, [settings])
   useLayoutEffect(() => {
     const field = input.current
@@ -138,8 +145,44 @@ function App() {
     setKeyboardOpen(false)
     input.current?.focus({ preventScroll: true })
   }
-  function stopAudio() { audioPlayers.current.forEach(audio => audio.pause()) }
+  function stopAudio() {
+    audioPlayers.current.forEach(audio => audio.pause())
+    speechRequest.current?.abort()
+    speechRequest.current = null
+  }
   function stop() { stopAudio(); request.current?.abort(); request.current = null; setGenerating(false) }
+  async function speak(messageId, text) {
+    const controller = new AbortController()
+    speechRequest.current = controller
+    try {
+      const response = await fetch('/api/tts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }), signal: controller.signal,
+      })
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}))
+        throw new Error(result.error || 'Speech is unavailable. You can still read the answer.')
+      }
+      if (!response.headers.get('content-type')?.includes('audio/wav')) {
+        throw new Error('The speech service returned an invalid audio file.')
+      }
+      const url = URL.createObjectURL(await response.blob())
+      if (speechRequest.current !== controller || controller.signal.aborted) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      audioUrls.current.add(url)
+      setMessages(current => current.map(message => message.id === messageId
+        ? { ...message, audio: url, audioError: null } : message))
+    } catch (cause) {
+      if (cause.name !== 'AbortError' && speechRequest.current === controller) {
+        setMessages(current => current.map(message => message.id === messageId
+          ? { ...message, audioError: cause.message || 'Speech is unavailable. You can still read the answer.' } : message))
+      }
+    } finally {
+      if (speechRequest.current === controller) speechRequest.current = null
+    }
+  }
   async function generate(history) {
     if (request.current) return
     stopAudio()
@@ -162,14 +205,14 @@ function App() {
       if (!response.ok) throw new Error(result.error || 'Unable to get an answer. Please retry.')
       if (typeof result.answer !== 'string') throw new Error('The backend returned an invalid answer.')
       if (request.current !== controller) return
-      setMessages([...history, {
+      const answer = {
         id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [],
         messageId: Number.isInteger(result.message_id) ? result.message_id : null,
-        vote: null,
-        audio: typeof result.audio === 'string' && result.audio.startsWith('data:audio/wav;base64,') ? result.audio : null,
-        audioError: result.audio_error || (result.tts_enabled === false ? 'Spoken answers are off. Start the backend with --tts to enable them.' : null),
-      }])
+        vote: null, audio: null, audioError: null,
+      }
+      setMessages([...history, answer])
       if (result.saved === false) setNotice('Answer received, but chat history could not be saved.')
+      speak(answer.id, answer.text)
     } catch (cause) {
       if (cause.name !== 'AbortError' && request.current === controller) setError(cause.message || 'Unable to connect to the backend.')
     } finally {
@@ -208,6 +251,8 @@ function App() {
     // Invalidate pending work before clearing the history used as model context.
     stop()
     cancelVoice()
+    audioUrls.current.forEach(url => URL.revokeObjectURL(url))
+    audioUrls.current.clear()
     setMessages([])
     setDraft('')
     setError('')

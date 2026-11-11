@@ -1,23 +1,17 @@
 """Local HTTP adapter for the kiosk RAG pipeline. Run from the project root."""
 
 import argparse
-import base64
-import io
-import os
-from pathlib import Path
-import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import sqlite3
 import threading
-from urllib.parse import urlsplit, parse_qs
-from admin_manager import AdminManager, MAX_UPLOAD
+from admin_manager import AdminManager
+from admin_api import create_server as create_admin_server
 
 MAX_BODY = 128 * 1024
 MAX_TEXT = 12000
 MAX_HISTORY = 5
-MAX_AUDIO_BODY = 30 * 96000 * 2 + 44
 log = logging.getLogger(__name__)
 
 
@@ -37,26 +31,8 @@ def validate_request(data):
     return {'question': question.strip(), 'chat_history': history}
 
 
-def load_speech(model_path):
-    from piper import PiperVoice
-    voice = PiperVoice.load(str(model_path))
-
-    def synthesize(answer):
-        output = io.BytesIO()
-        with wave.open(output, 'wb') as wav:
-            voice.synthesize_wav(answer, wav)
-        return output.getvalue()
-
-    return synthesize
-
-
-def create_server(address, chain, storage, speech=None, stt=None, admin=None):
-    # Protect the shared reranker and avoid concurrent generations on the kiosk.
-    generation_lock = threading.Lock()
-    admin = admin if admin is not None else AdminManager()
-    from stt import VoskSTT
-    transcriber = stt if stt is not None else VoskSTT()
-    transcription_lock = threading.Lock()
+def create_server(address, chain, storage, generation_lock=None):
+    generation_lock = generation_lock if generation_lock is not None else threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def respond(self, status, payload):
@@ -71,80 +47,13 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
             except (BrokenPipeError, ConnectionResetError):
                 pass  # The browser stopped waiting for this answer.
 
-        def admin_request(self):
-            route = urlsplit(self.path)
-            token = self.headers.get('Authorization', '').removeprefix('Bearer ')
-            try:
-                if route.path != '/api/admin/login' and not admin.authorized(token):
-                    self.respond(401, {'error': 'Administrator session expired. Enter your PIN again.'})
-                    return
-                if self.command == 'GET' and route.path == '/api/admin/files':
-                    self.respond(200, admin.snapshot())
-                    return
-                if self.command == 'GET' and route.path == '/api/admin/history':
-                    try:
-                        limit = int(parse_qs(route.query).get('limit', ['500'])[0])
-                    except ValueError:
-                        raise ValueError('History limit must be a number.') from None
-                    self.respond(200, {'records': storage.list_recent(limit)})
-                    return
-                if self.command != 'POST':
-                    self.respond(404, {'error': 'Not found.'})
-                    return
-                length = int(self.headers.get('Content-Length', '0'))
-                limit = MAX_UPLOAD if route.path == '/api/admin/upload' else MAX_BODY
-                if not 0 < length <= limit:
-                    self.respond(413, {'error': 'Empty or oversized request (uploads: maximum 25 MB).'})
-                    return
-                self.connection.settimeout(30)
-                body = self.rfile.read(length)
-                if len(body) != length:
-                    raise ValueError('Incomplete upload.')
-                if route.path == '/api/admin/upload':
-                    name = parse_qs(route.query).get('name', [''])[0]
-                    admin.upload(name, body)
-                    self.respond(201, {'message': 'Uploaded. Run ingestion to make this file searchable.'})
-                    return
-                data = json.loads(body)
-                if not isinstance(data, dict):
-                    raise ValueError('Expected a JSON object.')
-                if route.path == '/api/admin/login':
-                    self.respond(200, {'token': admin.login(data.get('pin'))})
-                elif route.path == '/api/admin/logout':
-                    admin.logout(token)
-                    self.respond(200, {'message': 'Signed out.'})
-                elif route.path in ('/api/admin/ingest', '/api/admin/reset', '/api/admin/remove'):
-                    action = route.path.rsplit('/', 1)[-1]
-                    if action == 'remove':
-                        admin.path(data.get('name'))
-                    admin.start(action, generation_lock, data.get('name'))
-                    self.respond(202, {'message': 'Operation started.'})
-                else:
-                    self.respond(404, {'error': 'Not found.'})
-            except PermissionError as exc:
-                self.respond(401, {'error': str(exc)})
-            except (ValueError, OSError) as exc:
-                self.respond(400, {'error': str(exc)})
-            except Exception:
-                log.exception('Admin request failed')
-                self.respond(500, {'error': 'Knowledge-base operation unavailable. Check backend logs.'})
-
         def do_GET(self):
-            if self.path.startswith('/api/admin/'):
-                self.admin_request()
-                return
             if self.path == '/api/health':
-                self.respond(200, {'status': 'ready', 'tts_enabled': speech is not None})
+                self.respond(200, {'status': 'ready', 'service': 'rag'})
             else:
                 self.respond(404, {'error': 'Not found.'})
 
         def do_POST(self):
-            if self.path.startswith('/api/admin/'):
-                self.admin_request()
-                return
-            if self.path == '/api/stt':
-                self.transcribe()
-                return
             if self.path == '/api/feedback':
                 self.save_feedback()
                 return
@@ -189,49 +98,13 @@ def create_server(address, chain, storage, speech=None, stt=None, admin=None):
                            'tps': result.get('tps'), 'ttft': result.get('ttft'), 'saved': saved,
                            'cache_hit': result.get('cache_hit', False),
                            'cache_similarity': result.get('cache_similarity'),
-                           'message_id': message_id,
-                           'tts_enabled': speech is not None}
-                if speech is not None:
-                    try:
-                        payload['audio'] = 'data:audio/wav;base64,' + base64.b64encode(speech(result['answer'])).decode('ascii')
-                    except Exception:
-                        log.exception('Speech synthesis failed')
-                        payload['audio_error'] = 'Speech is unavailable. You can still read the answer.'
+                           'message_id': message_id}
                 self.respond(200, payload)
             except Exception:
                 log.exception('RAG request failed')
                 self.respond(503, {'error': 'Unable to answer. Check Ollama and the knowledge base, then retry.'})
             finally:
                 generation_lock.release()
-
-        def transcribe(self):
-            if self.headers.get_content_type() != 'audio/wav':
-                self.respond(415, {'error': 'Use audio/wav.'})
-                return
-            try:
-                length = int(self.headers.get('Content-Length', '0'))
-                if not 44 < length <= MAX_AUDIO_BODY:
-                    self.respond(413, {'error': 'Audio is empty or too large (maximum 30 seconds).'})
-                    return
-                self.connection.settimeout(15)
-                data = self.rfile.read(length)
-                if len(data) != length:
-                    raise ValueError('Incomplete audio upload.')
-            except (ValueError, OSError) as exc:
-                self.respond(400, {'error': str(exc)})
-                return
-            if not transcription_lock.acquire(blocking=False):
-                self.respond(503, {'error': 'Voice input is busy. Please try again shortly.'})
-                return
-            try:
-                self.respond(200, {'text': transcriber.transcribe_wav(data)})
-            except ValueError as exc:
-                self.respond(400, {'error': str(exc)})
-            except Exception:
-                log.exception('Speech recognition failed')
-                self.respond(503, {'error': 'Voice input is unavailable. Check the backend Vosk model and requirements_stt.txt installation.'})
-            finally:
-                transcription_lock.release()
 
         def save_feedback(self):
             if self.headers.get_content_type() != 'application/json':
@@ -268,25 +141,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8000)
-    parser.add_argument('--tts', action='store_true', help='Generate Piper audio for browser answers')
-    parser.add_argument('--tts-model', default=os.getenv('PIPER_MODEL', str(Path(__file__).resolve().parent / 'voices/en_US-lessac-medium.onnx')), help='Piper ONNX voice path (used with --tts)')
+    parser.add_argument('--admin-port', type=int, default=8003)
     args = parser.parse_args()
-    speech = None
-    if args.tts:
-        try:
-            speech = load_speech(Path(args.tts_model).expanduser())
-        except Exception as exc:
-            parser.error(f'Cannot enable TTS: {exc}')
     from aichatbot import CHAT_DB_PATH, init_chatbot
     from chat_storage import ChatStorage
     chain, retriever = init_chatbot()
-    with create_server((args.host, args.port), chain, ChatStorage(CHAT_DB_PATH), speech=speech, admin=AdminManager(retriever)) as server:
+    storage = ChatStorage(CHAT_DB_PATH)
+    generation_lock = threading.Lock()
+    admin = AdminManager(retriever)
+    with create_server((args.host, args.port), chain, storage, generation_lock) as rag_server, \
+            create_admin_server((args.host, args.admin_port), storage, admin, generation_lock) as admin_server:
+        admin_thread = threading.Thread(target=admin_server.serve_forever, daemon=True)
+        admin_thread.start()
         print(f'RAG API ready at http://{args.host}:{args.port}', flush=True)
-        print(f'Browser speech: {"on" if speech else "off"}', flush=True)
+        print(f'Admin API ready at http://{args.host}:{args.admin_port}', flush=True)
         try:
-            server.serve_forever()
+            rag_server.serve_forever()
         except KeyboardInterrupt:
             pass
+        finally:
+            admin_server.shutdown()
+            admin_thread.join()
 
 
 if __name__ == '__main__':

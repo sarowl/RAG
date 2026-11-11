@@ -9,14 +9,17 @@ import sys
 from types import SimpleNamespace
 
 from admin_manager import AdminManager
-from api import create_server
+from admin_api import create_server
 
 
 class AdminTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.admin = AdminManager(docs_dir=self.temp.name)
-        self.server = create_server(('127.0.0.1', 0), Mock(), Mock(), stt=Mock(), admin=self.admin)
+        self.storage = Mock()
+        self.generation_lock = threading.Lock()
+        self.server = create_server(('127.0.0.1', 0), self.storage, admin=self.admin,
+                        generation_lock=self.generation_lock)
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
 
@@ -63,7 +66,8 @@ class AdminTests(unittest.TestCase):
             self.server.shutdown()
             self.server.server_close()
             self.thread.join()
-            self.server = create_server(('127.0.0.1', 0), Mock(), storage, stt=Mock(), admin=self.admin)
+            self.server = create_server(('127.0.0.1', 0), storage, admin=self.admin,
+                                        generation_lock=self.generation_lock)
             self.thread = threading.Thread(target=self.server.serve_forever)
             self.thread.start()
             with patch.dict('os.environ', {'ADMIN_PIN': '123456'}):

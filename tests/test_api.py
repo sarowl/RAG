@@ -1,4 +1,3 @@
-import base64
 import json
 import sqlite3
 import threading
@@ -19,7 +18,7 @@ class ApiTests(unittest.TestCase):
         }
         self.storage = Mock()
         self.storage.save.return_value = 42
-        self.server = create_server(('127.0.0.1', 0), self.chain, self.storage, speech=getattr(self, 'speech', None))
+        self.server = create_server(('127.0.0.1', 0), self.chain, self.storage)
         self.thread = threading.Thread(target=self.server.serve_forever)
         self.thread.start()
 
@@ -44,9 +43,7 @@ class ApiTests(unittest.TestCase):
         self.storage.save.assert_called_once_with('What do I bring?', 'Bring your ID.', 12.0, 0.5)
         self.assertTrue(result['saved'])
         self.assertEqual(result['message_id'], 42)
-        self.assertEqual(result['tts_enabled'], hasattr(self, 'speech'))
-        if not hasattr(self, 'speech'):
-            self.assertNotIn('audio', result)
+        self.assertNotIn('audio', result)
 
     def test_invalid_input_never_reaches_chain(self):
         for body in ({'question': ''}, {'question': 4}, {'question': 'Hi', 'history': ['bad']}, {'question': 'Hi', 'history': [['a', 'b']] * 6}):
@@ -71,9 +68,10 @@ class ApiTests(unittest.TestCase):
 
     def test_health_and_unknown_routes(self):
         status, health = self.request(None, '/api/health', 'GET')
-        self.assertEqual(status, 200)
-        self.assertEqual(health['tts_enabled'], hasattr(self, 'speech'))
+        self.assertEqual((status, health), (200, {'status': 'ready', 'service': 'rag'}))
         self.assertEqual(self.request({}, '/missing')[0], 404)
+        self.assertEqual(self.request({}, '/api/stt')[0], 404)
+        self.assertEqual(self.request({}, '/api/admin/files', 'GET')[0], 404)
 
     def test_feedback_persists_vote_and_clear(self):
         self.storage.set_feedback.return_value = True
@@ -88,26 +86,6 @@ class ApiTests(unittest.TestCase):
         for body in ({'message_id': 0, 'feedback': 'like'}, {'message_id': 42, 'feedback': 'maybe'}):
             self.assertEqual(self.request(body, '/api/feedback')[0], 400)
         self.storage.set_feedback.assert_not_called()
-
-
-class SpeechApiTests(ApiTests):
-    def setUp(self):
-        self.speech = Mock(return_value=b'RIFF-test-wave')
-        super().setUp()
-
-    def test_audio_is_returned_for_browser(self):
-        status, result = self.request({'question': 'Hi'})
-        self.assertEqual(status, 200)
-        self.assertEqual(base64.b64decode(result['audio'].split(',', 1)[1]), b'RIFF-test-wave')
-        self.speech.assert_called_once_with('Bring your ID.')
-
-    def test_speech_failure_preserves_text(self):
-        self.speech.side_effect = RuntimeError('private speech detail')
-        status, result = self.request({'question': 'Hi'})
-        self.assertEqual(status, 200)
-        self.assertEqual(result['answer'], 'Bring your ID.')
-        self.assertNotIn('audio', result)
-        self.assertNotIn('private', result['audio_error'])
 
 
 if __name__ == '__main__':

@@ -7,7 +7,7 @@ from http.client import HTTPConnection
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from api import create_server, MAX_AUDIO_BODY
+from stt_api import create_server, MAX_AUDIO_BODY
 from stt import VoskSTT
 
 
@@ -41,7 +41,7 @@ class WebSTTTests(unittest.TestCase):
     def test_endpoint_and_error_recovery(self):
         transcriber, chain, storage = Mock(), Mock(), Mock()
         transcriber.transcribe_wav.return_value = 'question'
-        with create_server(('127.0.0.1', 0), chain, storage, stt=transcriber) as server:
+        with create_server(('127.0.0.1', 0), stt=transcriber) as server:
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
 
