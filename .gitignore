@@ -8,3 +8,5 @@ chromadb_index/
 docs/
 chat_history.sqlite3*
 models/vosk-*/
+
+wsl_venv/
