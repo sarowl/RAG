@@ -1,8 +1,7 @@
+import argparse
 import csv
+from datetime import datetime, timezone
 from pathlib import Path
-
-from bert_score import BERTScorer
-from rouge_score import rouge_scorer
 
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_PATH = BASE_DIR / "eval_results.csv"
@@ -14,8 +13,11 @@ BERT_BATCH_SIZE = 4
 USE_STEMMER = True
 
 
-def main():
-    with INPUT_PATH.open(newline="", encoding="utf-8") as file:
+def evaluate(input_path=INPUT_PATH, output_path=OUTPUT_PATH):
+    from bert_score import BERTScorer
+    from rouge_score import rouge_scorer
+
+    with input_path.open(newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
         original_fields = reader.fieldnames or []
 
@@ -97,14 +99,56 @@ def main():
             )
 
     # Replaces the scored output; preserves the original input CSV.
-    with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as file:
+    with output_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=output_fields)
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"\nSaved results to {OUTPUT_PATH}")
+    print(f"\nSaved results to {output_path}")
     print(f"Scored: {len(valid_rows)}")
     print(f"Skipped: {len(rows) - len(valid_rows)}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run every benchmark question, then score similarity and faithfulness."
+    )
+    parser.add_argument("--benchmark", type=Path, default=BASE_DIR / "benchmark.json")
+    parser.add_argument("--output-dir", type=Path, help="New directory for this run.")
+    parser.add_argument("--judge-model", default="qwen2.5:1.5b")
+    parser.add_argument(
+        "--input", type=Path,
+        help="Score an existing runner CSV instead of sending questions again.",
+    )
+    args = parser.parse_args()
+
+    # Support both direct execution and python -m evaluation.evaluator.
+    if __package__:
+        from . import runner, factscore_evaluator
+    else:
+        import runner
+        import factscore_evaluator
+
+    # Check scoring dependencies before making potentially slow API requests.
+    import bert_score
+    import rouge_score
+
+    output_dir = args.output_dir or (
+        BASE_DIR / "runs" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+    )
+    output_dir.mkdir(parents=True, exist_ok=False)
+    raw_path = args.input or output_dir / "eval_results.csv"
+    scored_path = output_dir / "scored_results.csv"
+    final_path = output_dir / "scored_results_faithfulness.csv"
+
+    if args.input is None:
+        print("Step 1/3: Running all benchmark questions...", flush=True)
+        runner.main(args.benchmark, raw_path)
+    print("Step 2/3: Scoring ROUGE-L and BERTScore...", flush=True)
+    evaluate(raw_path, scored_path)
+    print("Step 3/3: Scoring faithfulness...", flush=True)
+    factscore_evaluator.evaluate(scored_path, final_path, args.judge_model)
+    print(f"\nEvaluation complete. Combined results: {final_path}")
 
 
 if __name__ == "__main__":

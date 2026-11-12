@@ -7,11 +7,11 @@ BASE_DIR = Path(__file__).resolve().parent
 BENCHMARK_PATH = BASE_DIR / "benchmark.json"
 OUTPUT_PATH = BASE_DIR / "eval_results.csv"
 API_URL = "http://127.0.0.1:8000/api/chat"
-MODEL_NAME = "qwen2.5:3b"
+MODEL_NAME = "phi4-mini:3.8b"
 
 
-def main():
-    with BENCHMARK_PATH.open(encoding="utf-8") as file:
+def main(benchmark_path=BENCHMARK_PATH, output_path=OUTPUT_PATH):
+    with benchmark_path.open(encoding="utf-8") as file:
         benchmark = json.load(file)
 
     if not isinstance(benchmark, list) or not benchmark:
@@ -33,11 +33,16 @@ def main():
     ]
 
     # Exclusive creation prevents accidentally overwriting an earlier run.
-    with OUTPUT_PATH.open("x", newline="", encoding="utf-8") as file:
+    with output_path.open("x", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
 
-        for case in benchmark:
+        total = len(benchmark)
+        succeeded = 0
+        print(f"Running all {total} questions once (no retries).", flush=True)
+
+        for position, case in enumerate(benchmark, start=1):
+            print(f"[{position}/{total}] Asking {case['query_id']}...", flush=True)
             row = {
                 "model": MODEL_NAME,
                 "query_id": case["query_id"],
@@ -84,9 +89,11 @@ def main():
 
             writer.writerow(row)
             file.flush()
-            print(f"{case['query_id']}: {row['status']}")
+            succeeded += row["status"] == "success"
+            print(f"[{position}/{total}] {case['query_id']}: {row['status']}", flush=True)
 
-    print(f"Results saved to {OUTPUT_PATH}")
+    print(f"Attempted: {total}; succeeded: {succeeded}; failed: {total - succeeded}")
+    print(f"Results saved to {output_path}")
 
 
 if __name__ == "__main__":

@@ -87,12 +87,11 @@ async def score_rows(rows, judge_model):
         print(f"{row.get('query_id', '?')}: {row['faithfulness_status']}")
 
 
-def main():
-    args = parse_args()
-    input_path = args.input.resolve()
+def evaluate(input_path, output_path=None, judge_model=DEFAULT_JUDGE_MODEL):
+    input_path = input_path.resolve()
     output_path = (
-        args.output.resolve()
-        if args.output
+        output_path.resolve()
+        if output_path
         else input_path.with_name(f"{input_path.stem}_faithfulness.csv")
     )
 
@@ -111,7 +110,7 @@ def main():
     if output_path.exists():
         raise FileExistsError(f"Refusing to overwrite existing output: {output_path}")
 
-    asyncio.run(score_rows(rows, args.judge_model))
+    asyncio.run(score_rows(rows, judge_model))
 
     added_fields = [
         "faithfulness_score", "supported_claims", "total_claims",
@@ -124,6 +123,11 @@ def main():
         writer.writerows(rows)
 
     print(f"Saved RAGAS Faithfulness results to {output_path}")
+
+
+def main():
+    args = parse_args()
+    evaluate(args.input, args.output, args.judge_model)
 
 
 if __name__ == "__main__":
