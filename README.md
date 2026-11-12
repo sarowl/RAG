@@ -1,3 +1,7 @@
+For the **WSL backend + Raspberry Pi STT/TTS and web UI** deployment, follow
+[the split-device setup guide](deploy/WSL_PI_SETUP.md). It supersedes the older
+single-device/index-copy instructions below for that deployment.
+
 ## Ollama embeddings
 
 Both `ingest.py` and `aichatbot.py` use Ollama's `embeddinggemma` by default.
