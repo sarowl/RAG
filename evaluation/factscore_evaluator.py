@@ -12,7 +12,7 @@ from ragas.llms import llm_factory
 from ragas.metrics.collections import Faithfulness
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_JUDGE_MODEL = "qwen2.5:1.5b"
+DEFAULT_JUDGE_MODEL = "gemma3:12b"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 
