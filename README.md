@@ -1,3 +1,7 @@
+For a **native Windows backend + Raspberry Pi STT/TTS and web UI**, follow
+[the Windows setup and dependency audit](deploy/WINDOWS_PI_SETUP.md) and install
+`requirements_windows.txt` in a fresh Windows virtual environment.
+
 For the **WSL backend + Raspberry Pi STT/TTS and web UI** deployment, follow
 [the split-device setup guide](deploy/WSL_PI_SETUP.md). It supersedes the older
 single-device/index-copy instructions below for that deployment.

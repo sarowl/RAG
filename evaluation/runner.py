@@ -7,7 +7,6 @@ BASE_DIR = Path(__file__).resolve().parent
 BENCHMARK_PATH = BASE_DIR / "benchmark.json"
 OUTPUT_PATH = BASE_DIR / "eval_results.csv"
 API_URL = "http://127.0.0.1:8000/api/chat"
-MODEL_NAME = "phi4-mini:3.8b"
 
 
 def main(benchmark_path=BENCHMARK_PATH, output_path=OUTPUT_PATH):
@@ -44,7 +43,7 @@ def main(benchmark_path=BENCHMARK_PATH, output_path=OUTPUT_PATH):
         for position, case in enumerate(benchmark, start=1):
             print(f"[{position}/{total}] Asking {case['query_id']}...", flush=True)
             row = {
-                "model": MODEL_NAME,
+                "model": "unknown",
                 "query_id": case["query_id"],
                 "query": case["query"],
                 "reference_answer": case["reference_answer"],
@@ -64,6 +63,7 @@ def main(benchmark_path=BENCHMARK_PATH, output_path=OUTPUT_PATH):
                 with urlopen(request, timeout=600) as response:
                     result = json.load(response)
 
+                row["model"] = result.get("model") or "unknown"
                 answer = result.get("answer")
                 if not isinstance(answer, str) or not answer.strip():
                     raise ValueError("API returned no usable answer.")

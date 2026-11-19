@@ -52,7 +52,7 @@ except ImportError:
 INDEX_DIR       = Path(os.getenv("INDEX_DIR", "./chromadb_index"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "kiosk_docs")
 RERANK_MODEL    = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-LLM_MODEL       = os.getenv("LLM_MODEL", "phi4-mini:3.8b")
+LLM_MODEL       = os.getenv("LLM_MODEL", "llama3.2:3b")
 CHAT_DB_PATH    = Path(os.getenv("CHAT_DB_PATH", "./chat_history.sqlite3"))
 
 K_RETRIEVE  = 20   # candidates fetched before reranking
@@ -342,6 +342,7 @@ Answer:""",
             standalone_question=RunnableLambda(condense_question),
         )
         | RunnableLambda(cached_answer)
+        | RunnablePassthrough.assign(model=RunnableLambda(lambda _: llm.model))
     )
 
     return chain
@@ -382,6 +383,7 @@ def init_chatbot():
     reranker  = CrossEncoder(RERANK_MODEL)
     retriever = HybridRetriever(collection=collection, reranker=reranker)
     llm       = OllamaLLM(model=LLM_MODEL, base_url=OLLAMA_BASE_URL)
+    print(f"Model: {llm.model}", flush=True)
     cache = None
     if os.getenv("SEMANTIC_CACHE_ENABLED", "true").lower() in ("true", "1", "yes"):
         cache = SemanticCache(

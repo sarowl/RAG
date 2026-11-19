@@ -1,0 +1,13 @@
+LAN Setup
+
+PC RAG BACKEND
+    python api.py --host 0.0.0.0 --port 8000 --admin-port 8003
+
+STT and TTS is performed locally on the PI
+
+cd RAG
+source venv_pi/bin/activate
+
+python stt_api.py --host 127.0.0.1 --port 8001
+
+python tts_api.py --host 127.0.0.1 --port 8002 --tts

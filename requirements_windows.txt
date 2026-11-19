@@ -1,0 +1,13 @@
+# Native Windows x64 backend: RAG, Admin API, and document ingestion.
+# Direct dependency versions retained from requirements.txt; pip resolves transitives.
+# This is not a full lockfile. See deploy/WINDOWS_PI_SETUP.md.
+bm25s==0.3.11
+chromadb==1.5.9
+docling==2.102.2
+langchain-core==1.2.13
+langchain-ollama==1.0.1
+ollama==0.6.1
+python-dotenv==1.2.1
+sentence-transformers==5.5.1
+transformers==5.12.1
+watchdog==6.0.0

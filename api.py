@@ -94,6 +94,7 @@ def create_server(address, chain, storage, generation_lock=None):
                     doc.page_content for doc in result.get('source_documents', [])
                 ]
                 payload = {'answer': result['answer'], 'sources': sources,
+                           'model': result.get('model'),
                            'retrieved_contexts': retrieved_contexts,
                            'tps': result.get('tps'), 'ttft': result.get('ttft'), 'saved': saved,
                            'cache_hit': result.get('cache_hit', False),

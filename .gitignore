@@ -10,3 +10,8 @@ chat_history.sqlite3*
 models/vosk-*/
 
 wsl_venv/
+
+
+evaluation
+
+sanitize
