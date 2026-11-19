@@ -105,12 +105,13 @@ class AdminTests(unittest.TestCase):
                                    index_dir=Path(self.temp.name))
         def ingest_file(document):
             ingester.state[str(document.resolve())] = 'new-hash'
+            return True
         ingester.ingest_file = Mock(side_effect=ingest_file)
         self.admin.factory = lambda: ingester
         lock = threading.Lock()
         save = Mock()
         module = SimpleNamespace(save_state=save, file_hash=lambda _: 'new-hash')
-        with patch.dict(sys.modules, {'ingest': module}):
+        with patch.dict(sys.modules, {'ingest': module}), self.assertLogs('admin_manager', level='INFO') as logs:
             self.admin.start('reset', lock)
             self.assertTrue(lock.acquire(timeout=3))
             lock.release()
@@ -119,6 +120,8 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(ingester.state, {str(path): 'new-hash'})
         self.assertTrue(path.exists())
         self.assertEqual(self.admin.job['state'], 'succeeded')
+        self.assertIn('Ingestion succeeded (reset)', logs.output[-1])
+        self.assertIn('Indexed: 1. Unchanged: 0.', logs.output[-1])
 
     def test_busy_chat_prevents_ingestion(self):
         lock = threading.Lock()

@@ -30,7 +30,9 @@ load_dotenv()
 
 import chromadb
 from embeddings import create_embedding_function
-from docling.document_converter import DocumentConverter
+from docling.datamodel.base_models import ConversionStatus, InputFormat
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
 from docling.chunking import HybridChunker
 from transformers import AutoTokenizer
 
@@ -117,10 +119,12 @@ class Ingester:
         self.embed_fn = create_embedding_function()
 
         log.info("Initialising Docling converter")
-        self.converter = DocumentConverter()
-
-
-        
+        pdf_options = StandardPdfPipeline.get_default_options()
+        # Limit the number of rendered pages waiting between PDF stages.
+        pdf_options.queue_max_size = 2
+        self.converter = DocumentConverter(
+            format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)}
+        )
 
         self.chunker = HybridChunker(
             tokenizer=self.tokenizer,
@@ -170,6 +174,10 @@ class Ingester:
             log.error("Docling failed on %s: %s", path.name, e)
             return False
 
+        if path.suffix.lower() == ".pdf" and result.status != ConversionStatus.SUCCESS:
+            log.error("PDF conversion incomplete for %s (%s)", path.name, result.status.value)
+            return False
+
         doc = result.document
         chunks = list(self.chunker.chunk(doc))
         if not chunks:
@@ -177,8 +185,6 @@ class Ingester:
             return False
 
         log.info("  %d chunks produced", len(chunks))
-        self._delete_existing_chunks(path.name)
-
         ids, texts, metadatas = [], [], []
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -214,6 +220,11 @@ class Ingester:
             texts.append(text)
             metadatas.append(metadata)
 
+        if not ids:
+            log.warning("No non-empty chunks produced for %s", path.name)
+            return False
+
+        self._delete_existing_chunks(path.name)
         self._preview_chunks(chunks[:3])
 
         batch_size = 100

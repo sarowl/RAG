@@ -9,6 +9,8 @@ import time
 
 SUPPORTED = {'.pdf', '.docx', '.pptx', '.html'}
 MAX_UPLOAD = 25 * 1024 * 1024
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
 
 
 class AdminManager:
@@ -84,6 +86,10 @@ class AdminManager:
                 raise ValueError('The assistant or knowledge base is busy. Try again shortly.')
             self.job = {'state': 'running', 'message': f'{action.capitalize()} in progress…'}
         def work():
+            started = time.monotonic()
+            indexed = unchanged = 0
+            if action != 'remove':
+                log.info('Ingestion started (%s) from %s', action, self.docs)
             try:
                 if self.factory:
                     ingester = self.factory()
@@ -107,9 +113,13 @@ class AdminManager:
                     from ingest import file_hash
                     for path in sorted(self.docs.rglob('*')):
                         if path.is_file() and not path.is_symlink() and path.suffix.lower() in SUPPORTED:
-                            ingester.ingest_file(path)
+                            updated = ingester.ingest_file(path)
                             if ingester.state.get(str(path.resolve())) != file_hash(path):
                                 raise ValueError(f'Could not ingest {path.name}. Check the backend logs.')
+                            if updated:
+                                indexed += 1
+                            else:
+                                unchanged += 1
                 message = 'File removed from documents and search.' if action == 'remove' else 'Ingestion complete. Search is up to date.'
                 state = 'succeeded'
             except Exception:
@@ -125,6 +135,17 @@ class AdminManager:
                 except Exception:
                     logging.exception('Could not refresh knowledge base')
                     state, message = 'failed', 'Search refresh failed. Restart the backend before using chat.'
+                if action != 'remove':
+                    counts = f'Indexed: {indexed}. Unchanged: {unchanged}.'
+                    if state == 'succeeded':
+                        message = (f'Ingestion complete. {counts}'
+                                   if indexed or unchanged else 'Ingestion complete. No supported files found.')
+                    log.log(
+                        logging.INFO if state == 'succeeded' else logging.ERROR,
+                        'Ingestion %s (%s) in %.1fs. %s',
+                        state, action, time.monotonic() - started,
+                        message if state == 'succeeded' else f'{counts} {message}',
+                    )
                 with self.lock:
                     self.job = {'state': state, 'message': message}
                 generation_lock.release()

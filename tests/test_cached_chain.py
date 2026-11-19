@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from aichatbot import build_chain, HybridRetriever
+from aichatbot import build_chain, HybridRetriever, NO_EVIDENCE_ANSWER, RERANK_MIN_SCORE
 from langchain_core.documents import Document
 from semantic_cache import SemanticCache
 
@@ -43,6 +43,28 @@ class CachedChainTests(unittest.TestCase):
         self.embed.side_effect = RuntimeError('offline')
         self.assertEqual(self.chain.invoke({'question': 'Documents?'})['answer'], 'Bring your ID.')
         self.llm.generate.assert_called_once()
+
+    def test_no_sources_skips_answer_generation(self):
+        self.retriever.retrieve.return_value = []
+        result = self.chain.invoke({'question': 'Which books are available?'})
+        self.assertEqual(result['answer'], NO_EVIDENCE_ANSWER)
+        self.assertEqual(result['source_documents'], [])
+        self.assertIsNone(result['ttft'])
+        self.llm.generate.assert_not_called()
+
+    def test_retriever_discards_low_scoring_chunks(self):
+        collection = Mock()
+        collection.count.return_value = 2
+        collection.query.return_value = {'ids': [['irrelevant', 'relevant']]}
+        collection.get.return_value = {'ids': [], 'documents': [], 'metadatas': []}
+        reranker = Mock()
+        reranker.predict.return_value = [RERANK_MIN_SCORE - 1, RERANK_MIN_SCORE + 1]
+        retriever = HybridRetriever(collection, reranker)
+        retriever._id_to_document = Mock(side_effect=[
+            Document(page_content='Irrelevant'),
+            Document(page_content='Relevant'),
+        ])
+        self.assertEqual([doc.page_content for doc in retriever.retrieve('Question?')], ['Relevant'])
 
     def test_refresh_invalidates_cache(self):
         self.chain.invoke({'question': 'Documents?'})
