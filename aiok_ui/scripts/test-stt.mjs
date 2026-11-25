@@ -71,6 +71,12 @@ try {
   }
   await call('Page.navigate', { url: `http://127.0.0.1:${server.address().port}` })
   await waitFor('!!document.querySelector(".suggestion")')
+  const resetChat = async () => {
+    await evaluate('document.querySelector(".new-chat").click()')
+    await waitFor('!!document.querySelector(".confirm-dialog[open]")')
+    await evaluate('document.querySelector(".confirm-dialog .primary-button").click()')
+    await waitFor('!document.querySelector(".confirm-dialog")')
+  }
   const clickMic = () => evaluate(`document.querySelector('.composer .icon-button').click()`)
   const record = async () => {
     await clickMic()
@@ -83,10 +89,10 @@ try {
   await record()
   assert.equal(await evaluate('document.querySelector("textarea").value'), 'What are the requirements for graduation? recognized question')
   assert.equal(uploads, 1)
-  await evaluate('document.querySelector(".new-chat").click()')
+  await resetChat()
   await clickMic()
   await waitFor(`document.querySelector('.listening') !== null`)
-  await evaluate('document.querySelector(".new-chat").click()')
+  await resetChat()
   assert.equal(await evaluate('document.querySelector("textarea").value'), '')
   assert.equal(uploads, 1)
   for (const value of ['empty', 'error']) {
@@ -102,7 +108,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 250))
   await clickMic()
   await waitFor(`document.body.textContent.includes('Transcribing')`)
-  await evaluate('document.querySelector(".new-chat").click()')
+  await resetChat()
   await new Promise(resolve => setTimeout(resolve, 750))
   assert.equal(await evaluate('document.querySelector("textarea").value'), '')
   await evaluate(`navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Denied', 'NotAllowedError'))`)

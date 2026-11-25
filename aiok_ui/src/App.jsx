@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Admin, { AdminAccess } from './Admin'
 import AnswerAudio from './AnswerAudio'
+import ConfirmDialog from './ConfirmDialog'
 import TouchKeyboard from './TouchKeyboard'
 import { createVoiceInput } from './voiceInput'
 import './App.css'
 
 const paths = {
+  keyboard: 'M2 6h20v12H2ZM6 10h1m4 0h1m4 0h1M7 14h10',
   plus: 'M12 5v14M5 12h14', arrow: 'M12 19V5m-6 6 6-6 6 6',
   code: 'm8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16',
   bulb: 'M9 18h6m-5 3h4M8 14a6 6 0 1 1 8 0c-1 1-1 2-1 2H9s0-1-1-2',
@@ -27,10 +29,10 @@ function Icon({ name, size = 20 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.book} /></svg>
 }
 const suggestions = [
-  { icon: 'book', title: 'Graduation requirements', text: 'Prepare for your next step', prompt: 'What are the requirements for graduation?', color: 'sage' },
-  { icon: 'file', title: 'Student insurance', text: 'Find coverage information', prompt: 'Where can I find information about student insurance?', color: 'blue' },
-  { icon: 'file', title: 'Campus guidelines', text: 'Understand university policies', prompt: 'What are the university guidelines for merchandise selling?', color: 'amber' },
-  { icon: 'bulb', title: 'Find the right office', text: 'Get help with your concern', prompt: 'Which university office should I contact for my concern?', color: 'purple' },
+  { icon: 'book', prompt: 'What are the requirements for graduation?' },
+  { icon: 'file', prompt: 'Where can I find information about student insurance?' },
+  { icon: 'file', prompt: 'What are the university guidelines for merchandise selling?' },
+  { icon: 'bulb', prompt: 'Which university office should I contact for my concern?' },
 ]
 function inline(text) { return text.split(/(\*\*.*?\*\*|`.*?`)/g).map((part, i) => part.startsWith('**') ? <strong key={i}>{part.slice(2, -2)}</strong> : part.startsWith('`') ? <code key={i}>{part.slice(1, -1)}</code> : part) }
 function renderMarkdownBlocks(text, keyPrefix) {
@@ -93,6 +95,7 @@ function App() {
   const [generating, setGenerating] = useState(false)
   const [adminToken, setAdminToken] = useState(null)
   const [settings, setSettings] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
   const [notice, setNotice] = useState('')
   const [voiceState, setVoiceState] = useState('idle')
   const listening = voiceState === 'recording'
@@ -100,9 +103,16 @@ function App() {
   const [error, setError] = useState('')
   const audioPlayers = useRef(new Set())
   const audioUrls = useRef(new Set())
-  const input = useRef(null), bottom = useRef(null), request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
+  const input = useRef(null), latestMessage = useRef(null)
+  const request = useRef(null), recognition = useRef(null), dialog = useRef(null), settingsButton = useRef(null)
+  const nextMessageId = useRef(0)
+  const followConversation = useRef(true)
   const speechRequest = useRef(null)
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, generating])
+  const latestMessageId = messages.at(-1)?.id
+  const hasCustomDraft = Boolean(draft.trim()) && !suggestions.some(item => item.prompt === draft)
+  useLayoutEffect(() => {
+    if (followConversation.current) latestMessage.current?.scrollIntoView({ block: 'start' })
+  }, [latestMessageId])
   useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(id) }, [notice])
   useEffect(() => () => {
     request.current?.abort()
@@ -115,9 +125,8 @@ function App() {
     const field = input.current
     if (!field) return
     field.style.height = 'auto'
-    field.style.height = `${Math.min(field.scrollHeight, keyboardOpen ? 80 : 160)}px`
+    field.style.height = `${field.scrollHeight}px`
     if (pendingCaret.current !== null) {
-      field.focus({ preventScroll: true })
       field.setSelectionRange(pendingCaret.current, pendingCaret.current)
       pendingCaret.current = null
     }
@@ -134,7 +143,6 @@ function App() {
     const insertion = key === 'Backspace' ? '' : key
     const next = draft.slice(0, start) + insertion + draft.slice(end)
     const caret = start + insertion.length
-    field.focus({ preventScroll: true })
     if (next === draft) field.setSelectionRange(caret, caret)
     else {
       pendingCaret.current = caret
@@ -206,7 +214,7 @@ function App() {
       if (typeof result.answer !== 'string') throw new Error('The backend returned an invalid answer.')
       if (request.current !== controller) return
       const answer = {
-        id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [],
+        id: ++nextMessageId.current, role: 'assistant', text: result.answer, sources: result.sources || [],
         messageId: Number.isInteger(result.message_id) ? result.message_id : null,
         vote: null, audio: null, audioError: null,
       }
@@ -221,10 +229,12 @@ function App() {
   }
   function send(event) {
     event?.preventDefault()
-    if (generating || voiceBusy || !draft.trim()) return
-    const next = [...messages, { id: crypto.randomUUID(), role: 'user', text: draft.trim() }]
+    if (request.current || voiceBusy || !draft.trim()) return
+    const next = [...messages, { id: ++nextMessageId.current, role: 'user', text: draft.trim() }]
+    followConversation.current = true
+    setKeyboardOpen(false)
+    input.current?.focus({ preventScroll: true })
     setMessages(next); setDraft(''); generate(next)
-    if (input.current) input.current.style.height = 'auto'
   }
   async function copy(text) { try { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard') } catch { setNotice('Clipboard access is unavailable in this browser.') } }
   async function vote(message, vote) {
@@ -257,10 +267,26 @@ function App() {
     setDraft('')
     setError('')
     setNotice('')
-    if (input.current) {
-      input.current.style.height = 'auto'
-      input.current.focus()
-    }
+    setKeyboardOpen(false)
+    followConversation.current = true
+    if (confirmReset) {
+      setConfirmReset(false)
+      // Let the native dialog restore focus before moving it to the composer.
+      requestAnimationFrame(() => input.current?.focus({ preventScroll: true }))
+    } else input.current?.focus({ preventScroll: true })
+  }
+  function requestNewChat() {
+    if (messages.length || draft || voiceBusy) setConfirmReset(true)
+    else newChat()
+  }
+  function toggleKeyboard() {
+    setKeyboardOpen(open => !open)
+    input.current?.focus({ preventScroll: true })
+  }
+  function clearDraft() {
+    pendingCaret.current = null
+    setDraft('')
+    input.current?.focus({ preventScroll: true })
   }
   function voice() {
     if (recognition.current) {
@@ -284,38 +310,67 @@ function App() {
     recognition.current = session
     session.start()
   }
-  if (adminToken) return <Admin token={adminToken} onExit={() => setAdminToken(null)} />
+  if (adminToken) return <Admin token={adminToken} onExit={() => {
+    setAdminToken(null)
+    requestAnimationFrame(() => settingsButton.current?.focus())
+  }} />
   return <div className={`app${keyboardOpen ? ' keyboard-open' : ''}`}>
     <header className="topbar">
-      <a className="brand" href="./" aria-label="AIOK home"><span>aiok</span></a>
-      <nav aria-label="Chat controls"><button className="new-chat" onClick={newChat}><Icon name="plus" size={17} /><span>New chat</span></button><span className="nav-divider" /><button className="icon-button" aria-label="Settings" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button></nav>
+      <span className="brand">AIOK</span>
+      <nav aria-label="Chat controls">
+        <button className="new-chat secondary-button" onClick={requestNewChat}><Icon name="plus" size={17} />New chat</button>
+        <button className="icon-button" aria-label="Administrator access" title="Administrator access" ref={settingsButton} onClick={() => setSettings(true)}><Icon name="settings" /></button>
+      </nav>
     </header>
-    <main className="conversation" aria-label="Conversation">
+    <main className="conversation" aria-label="Conversation" tabIndex={0} onScroll={event => {
+      const { scrollHeight, scrollTop, clientHeight } = event.currentTarget
+      followConversation.current = scrollHeight - scrollTop - clientHeight < 48
+    }}>
       {!messages.length ? <section className="welcome">
 
-        <h1>Your university.<br /><span>A little easier to navigate.</span></h1>
-        <p className="welcome-copy">Hi, what can I help you find today?<br /><span>Your guide to university requirements, policies, and services.</span></p>
-        <div className="suggestions">{suggestions.map(item => <button className="suggestion" key={item.title} onClick={() => { setDraft(item.prompt); input.current?.focus() }}><span className={`suggestion-icon ${item.color}`}><Icon name={item.icon} /></span><strong>{item.title}</strong><span>{item.text}</span><span className="card-arrow">↗</span></button>)}</div>
-        <p className="welcome-hint">Designed to answer from the university’s locally saved knowledge base.</p>
-      </section> : <div className="message-list">{messages.map((message, index) => <article className={`message ${message.role}`} key={message.id}>
+        <h1>University assistant</h1>
+        <p className="welcome-copy">Ask about requirements, policies, and campus services.</p>
+        <div className="suggestions" role="group" aria-label="Suggested questions">{suggestions.map(item =>
+          <button className="suggestion" key={item.prompt} disabled={hasCustomDraft} onClick={() => {
+            setDraft(item.prompt)
+            input.current?.focus({ preventScroll: true })
+          }}><Icon name={item.icon} size={18} /><span>{item.prompt}</span></button>
+        )}</div>
+      </section> : <div className="message-list" role="log" aria-label="Chat messages" aria-relevant="additions">{messages.map((message, index) => <article className={`message ${message.role}`} key={message.id} ref={index === messages.length - 1 ? latestMessage : undefined}>
         <div className="message-label">{message.role === 'assistant' && <span className="mini-mark"><SchoolLogo size={24} /></span>}{message.role === 'user' ? 'You' : 'AIOK'}</div>
         <div className="message-body">{message.role === 'assistant' ? <Markdown text={message.text} onCopy={copy} /> : message.text}</div>
         {message.audio && <AnswerAudio src={message.audio} players={audioPlayers} />}
         {message.audioError && <p role="status">{message.audioError}</p>}
         {message.sources?.length > 0 && <details className="sources"><summary>Sources ({message.sources.length})</summary><ul>{message.sources.map((source, i) => <li key={i}>{source.source || 'Unknown source'}{source.page != null && source.page >= 0 ? ` · page ${source.page}` : ''}{source.headings ? ` · ${source.headings}` : ''}</li>)}</ul></details>}
-        {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['like', 'dislike'].map(vote => <button key={vote} aria-label={vote === 'like' ? 'Like response' : 'Dislike response'} title={vote === 'like' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'dislike' ? 'dislike' : ''} onClick={() => voteResponse(message, vote)}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating} aria-label="Regenerate response" title="Regenerate response" onClick={() => { const history = messages.slice(0, -1); setMessages(history); generate(history) }}><Icon name="retry" size={16} /></button>}</div>}
-      </article>)}{generating && <div className="loading" role="status"><span className="mini-mark"><SchoolLogo size={24} /></span><span className="dots"><i /><i /><i /></span><span>Thinking it through</span></div>}<div ref={bottom} /></div>}
+        {message.role === 'assistant' && <div className="message-actions"><button aria-label="Copy response" title="Copy response" onClick={() => copy(message.text)}><Icon name="copy" size={16} /></button>{['like', 'dislike'].map(vote => <button key={vote} aria-label={vote === 'like' ? 'Like response' : 'Dislike response'} title={vote === 'like' ? 'Like response' : 'Dislike response'} aria-pressed={message.vote === vote} className={vote === 'dislike' ? 'dislike' : ''} onClick={() => voteResponse(message, vote)}><Icon name="like" size={16} /></button>)}{index === messages.length - 1 && <button disabled={generating || voiceBusy} aria-label="Regenerate response" title="Regenerate response" onClick={() => generate(messages.slice(0, -1))}><Icon name="retry" size={16} /></button>}</div>}
+      </article>)}</div>}
     </main>
     <footer className="composer-footer"><div className="composer-container">
       {error && <p className="request-error" role="alert">{error}</p>}
-      {!generating && messages.at(-1)?.role === 'user' && <button className="retry-request" onClick={() => generate(messages)}>Retry last question</button>}
-      {voiceBusy && <p className="voice-status" role="status">{listening ? 'Listening… Click the microphone to stop (30 seconds maximum).' : voiceState === 'starting' ? 'Opening microphone… Click again to cancel.' : 'Transcribing… Click the microphone to cancel.'}</p>}
+      {!generating && messages.at(-1)?.role === 'user' && <button className="retry-request secondary-button" disabled={voiceBusy} onClick={() => generate(messages)}>Retry last question</button>}
+      <div className="composer-status" role="status">{generating ? 'Preparing an answer…' : listening ? 'Listening… Select the microphone to stop (30 seconds maximum).' : voiceState === 'starting' ? 'Opening microphone…' : voiceBusy ? 'Transcribing…' : ''}</div>
       <form className="composer" onSubmit={send}>
-        <textarea ref={input} value={draft} rows={1} inputMode="none" placeholder="Ask about university information..." aria-label="Ask about university information" aria-controls={keyboardOpen ? 'touch-keyboard' : undefined} onClick={() => setKeyboardOpen(true)} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') hideKeyboard(); if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } }} />
-        <div className="composer-toolbar"><div className="composer-left"><span className="preview-mode"><span />Local knowledge base</span></div><div className="composer-right"><span className="enter-hint">Enter to send</span><button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Use microphone'} aria-pressed={voiceBusy} title={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Start recording'} disabled={generating} onClick={voice}><Icon name="mic" /></button><button className="send-button" type={generating ? 'button' : 'submit'} disabled={!generating && (voiceBusy || !draft.trim())} onClick={generating ? stop : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={20} /></button></div></div>
-      </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p><div className="footer-note"></div>
+        <textarea ref={input} value={draft} rows={1} inputMode="none" placeholder="Ask a university question…" aria-label="Your question"
+          onClick={() => setKeyboardOpen(true)}
+          onChange={event => setDraft(event.target.value)} onKeyDown={event => {
+            if (event.key === 'Escape' && keyboardOpen) hideKeyboard()
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() }
+          }} />
+        <div className="composer-toolbar">
+          <span className="enter-hint">Enter to send · Shift+Enter for a new line</span>
+          <div className="composer-right">
+            <button type="button" className="secondary-button clear-draft" aria-label="Clear question" disabled={!draft} onClick={clearDraft}>Clear</button>
+            <button type="button" className={`icon-button ${listening ? 'listening' : ''}`} aria-label={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Use microphone'} aria-pressed={voiceBusy} title={listening ? 'Stop recording' : voiceBusy ? 'Cancel voice input' : 'Start recording'} disabled={generating} onClick={voice}><Icon name="mic" /></button>
+            <button type="button" className="icon-button keyboard-toggle" aria-label="On-screen keyboard" title="On-screen keyboard" aria-expanded={keyboardOpen} aria-controls={keyboardOpen ? 'touch-keyboard' : undefined} onClick={toggleKeyboard}><Icon name="keyboard" /></button>
+            <button className="primary-button send-button" type={generating ? 'button' : 'submit'} disabled={!generating && (voiceBusy || !draft.trim())} onClick={generating ? () => { stop(); setNotice('Answer stopped') } : undefined} aria-label={generating ? 'Stop generating' : 'Send message'}><Icon name={generating ? 'stop' : 'arrow'} size={18} />{generating ? 'Stop' : 'Send'}</button>
+          </div>
+        </div>
+      </form><p className="disclaimer">AI can make mistakes. Confirm important details with the relevant university office.</p>
     </div></footer>
     {keyboardOpen && <TouchKeyboard onKey={typeKey} onHide={hideKeyboard} />}
+    {confirmReset && <ConfirmDialog title="Start a new chat?" action="Start new chat" onConfirm={newChat} onCancel={() => setConfirmReset(false)}>
+      This clears the current conversation and any unfinished question from this screen.
+    </ConfirmDialog>}
     <dialog className="settings-dialog" aria-labelledby="settings-title" ref={dialog} onCancel={() => setSettings(false)} onClose={() => { setSettings(false); settingsButton.current?.focus() }} onClick={event => { if (event.target === dialog.current) setSettings(false) }}>
       <div className="settings-heading"><h2 id="settings-title">Administrator access</h2><button className="icon-button" aria-label="Close settings" onClick={() => setSettings(false)}><Icon name="close" /></button></div>
       {settings && <AdminAccess onAuthorize={token => { stop(); cancelVoice(); setKeyboardOpen(false); setSettings(false); setAdminToken(token) }} />}

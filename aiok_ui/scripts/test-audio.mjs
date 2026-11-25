@@ -78,6 +78,12 @@ try {
   }
   await call('Page.navigate', { url: `http://127.0.0.1:${server.address().port}` })
   await waitFor('!!document.querySelector(".suggestion")')
+  const resetChat = async () => {
+    await evaluate('document.querySelector(".new-chat").click()')
+    await waitFor('!!document.querySelector(".confirm-dialog[open]")')
+    await evaluate('document.querySelector(".confirm-dialog .primary-button").click()')
+    await waitFor('!document.querySelector(".confirm-dialog")')
+  }
   const send = async () => {
     await evaluate('document.querySelector(".suggestion").click()')
     await evaluate('document.querySelector("form").requestSubmit()')
@@ -86,7 +92,12 @@ try {
   await send()
   await waitFor('document.querySelector("audio")?.currentTime > 0')
   assert.equal(await evaluate('document.querySelector("audio").error'), null)
-  await evaluate('document.querySelector(".new-chat").click()')
+  await evaluate('document.querySelector(".new-chat").focus(); document.querySelector(".new-chat").click()')
+  await waitFor('document.activeElement === document.querySelector(".confirm-dialog .secondary-button")')
+  await evaluate('document.querySelector(".confirm-dialog .secondary-button").click()')
+  await waitFor('document.activeElement === document.querySelector(".new-chat")')
+  assert.equal(await evaluate('document.querySelectorAll("audio").length'), 1)
+  await resetChat()
   assert.equal(await evaluate('document.querySelectorAll("audio").length'), 0)
   await evaluate(`window.originalPlay = HTMLMediaElement.prototype.play; HTMLMediaElement.prototype.play = function () { return Promise.reject(new DOMException('Blocked', 'NotAllowedError')) }`)
   await send()
@@ -95,7 +106,7 @@ try {
   await waitFor('document.querySelector("audio")?.currentTime > 0')
   for (const value of ['off', 'error']) {
     mode = value
-    await evaluate('document.querySelector(".new-chat").click()')
+    await resetChat()
     await send()
     const expected = value === 'off' ? 'Spoken answers are off.' : 'Speech is unavailable.'
     await waitFor(`document.body.textContent.includes(${JSON.stringify(expected)})`)
