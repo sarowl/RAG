@@ -1,0 +1,21 @@
+Desktop Device/PC
+wsl
+source wsl_venv/bin/activate
+python api.py --host 0.0.0.0 --port 8000 --admin-port 8003
+
+Pi shortcut (run once from the RAG repository root)
+bash install-pi-shortcut.sh 192.168.1.50
+Replace the IP with the backend PC LAN address.
+Open AIOK Kiosk on the Pi desktop; allow launching if prompted.
+Keep its terminal open. Ctrl+C stops STT, TTS, and the UI.
+The PC backend must be running separately.
+
+Pi manual startup alternative
+source venv_pi/bin/activate
+TTS
+python tts_api.py --host 127.0.0.1 --port 8002   --tts --tts-model "$PWD/voices/en_US-lessac-medium.onnx"
+STT
+python stt_api.py --host 127.0.0.1 --port 8001
+
+Frontend
+npm run dev -- --host 0.0.0.0

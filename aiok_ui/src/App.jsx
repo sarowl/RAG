@@ -3,6 +3,7 @@ import Admin, { AdminAccess } from './Admin'
 import AnswerAudio from './AnswerAudio'
 import TouchKeyboard from './TouchKeyboard'
 import { createVoiceInput } from './voiceInput'
+import { createMessageId } from './messageId'
 import './App.css'
 
 const paths = {
@@ -206,7 +207,7 @@ function App() {
       if (typeof result.answer !== 'string') throw new Error('The backend returned an invalid answer.')
       if (request.current !== controller) return
       const answer = {
-        id: crypto.randomUUID(), role: 'assistant', text: result.answer, sources: result.sources || [],
+        id: createMessageId(), role: 'assistant', text: result.answer, sources: result.sources || [],
         messageId: Number.isInteger(result.message_id) ? result.message_id : null,
         vote: null, audio: null, audioError: null,
       }
@@ -222,7 +223,7 @@ function App() {
   function send(event) {
     event?.preventDefault()
     if (generating || voiceBusy || !draft.trim()) return
-    const next = [...messages, { id: crypto.randomUUID(), role: 'user', text: draft.trim() }]
+    const next = [...messages, { id: createMessageId(), role: 'user', text: draft.trim() }]
     setMessages(next); setDraft(''); generate(next)
     if (input.current) input.current.style.height = 'auto'
   }
@@ -293,7 +294,7 @@ function App() {
     <main className="conversation" aria-label="Conversation">
       {!messages.length ? <section className="welcome">
 
-        <h1>Your university.<br /><span>A little easier to navigate.</span></h1>
+        <h1>CIT university.<br /><span>A little easier to navigate.</span></h1>
         <p className="welcome-copy">Hi, what can I help you find today?<br /><span>Your guide to university requirements, policies, and services.</span></p>
         <div className="suggestions">{suggestions.map(item => <button className="suggestion" key={item.title} onClick={() => { setDraft(item.prompt); input.current?.focus() }}><span className={`suggestion-icon ${item.color}`}><Icon name={item.icon} /></span><strong>{item.title}</strong><span>{item.text}</span><span className="card-arrow">↗</span></button>)}</div>
         <p className="welcome-hint">Designed to answer from the university’s locally saved knowledge base.</p>
